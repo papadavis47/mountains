@@ -21,6 +21,17 @@ pub struct InPlaceEdit<'a> {
     pub cursor: usize,
 }
 
+/// The read-only slice of app state every section renderer needs: which day is
+/// shown, all logs (to locate that day), and which section holds focus. Bundling
+/// these three keeps each `render_*_section` signature short. It's `Copy` — a
+/// date plus two shared references — so it's passed by value freely.
+#[derive(Clone, Copy)]
+pub struct SectionCtx<'a> {
+    pub selected_date: NaiveDate,
+    pub daily_logs: &'a [DailyLog],
+    pub focused_section: &'a FocusedSection,
+}
+
 /// Renders the daily view screen for a specific date
 pub fn render_daily_view_screen(
     f: &mut Frame,
@@ -54,12 +65,17 @@ pub fn render_daily_view_screen(
     );
     render_title(f, chunks[0], &title);
 
+    // Shared read-model for every section renderer this frame.
+    let ctx = SectionCtx {
+        selected_date: state.selected_date,
+        daily_logs: &state.daily_logs,
+        focused_section: &state.focused_section,
+    };
+
     render_measurements_section(
         f,
         chunks[1],
-        state.selected_date,
-        &state.daily_logs,
-        &state.focused_section,
+        ctx,
         edit.as_ref(),
         click_targets.as_deref_mut(),
     );
@@ -70,9 +86,7 @@ pub fn render_daily_view_screen(
     render_running_section(
         f,
         chunks[2],
-        state.selected_date,
-        &state.daily_logs,
-        &state.focused_section,
+        ctx,
         yearly_miles,
         monthly_miles,
         edit.as_ref(),
@@ -82,10 +96,8 @@ pub fn render_daily_view_screen(
     render_food_list_section(
         f,
         chunks[3],
-        state.selected_date,
-        &state.daily_logs,
+        ctx,
         food_list_state,
-        &state.focused_section,
         state.food_list_focused,
         click_targets.as_deref_mut(),
     );
@@ -93,31 +105,15 @@ pub fn render_daily_view_screen(
     render_sokay_section(
         f,
         chunks[4],
-        state.selected_date,
-        &state.daily_logs,
+        ctx,
         sokay_list_state,
-        &state.focused_section,
         state.sokay_list_focused,
         click_targets.as_deref_mut(),
     );
 
-    render_strength_mobility_section(
-        f,
-        chunks[5],
-        state.selected_date,
-        &state.daily_logs,
-        &state.focused_section,
-        click_targets.as_deref_mut(),
-    );
+    render_strength_mobility_section(f, chunks[5], ctx, click_targets.as_deref_mut());
 
-    render_notes_section(
-        f,
-        chunks[6],
-        state.selected_date,
-        &state.daily_logs,
-        &state.focused_section,
-        click_targets.as_deref_mut(),
-    );
+    render_notes_section(f, chunks[6], ctx, click_targets.as_deref_mut());
 
     let help_tiers: &[&str] = if edit.is_some() {
         &[
@@ -143,7 +139,7 @@ pub fn render_daily_view_screen(
                 state.selected_date,
                 &state.daily_logs,
                 state.strength_mobility_scroll,
-                click_targets.as_deref_mut(),
+                click_targets,
             );
         }
         FocusedSection::Notes => {
@@ -153,7 +149,7 @@ pub fn render_daily_view_screen(
                 state.selected_date,
                 &state.daily_logs,
                 state.notes_scroll,
-                click_targets.as_deref_mut(),
+                click_targets,
             );
         }
         _ => {}
@@ -164,13 +160,14 @@ pub fn render_daily_view_screen(
 fn render_measurements_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
-    selected_date: NaiveDate,
-    daily_logs: &[DailyLog],
-    focused_section: &FocusedSection,
+    ctx: SectionCtx,
     edit: Option<&InPlaceEdit>,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let log = daily_logs.iter().find(|log| log.date == selected_date);
+    let log = ctx
+        .daily_logs
+        .iter()
+        .find(|log| log.date == ctx.selected_date);
 
     // A field in this section being actively edited in place (Weight or Waist).
     let editing_field = match edit.map(|e| e.field) {
@@ -179,13 +176,13 @@ fn render_measurements_section(
         _ => None,
     };
 
-    let section_focused = matches!(focused_section, FocusedSection::Measurements { .. });
+    let section_focused = matches!(ctx.focused_section, FocusedSection::Measurements { .. });
     let has_focus = section_focused || editing_field.is_some();
 
     // The field showing the ► marker: the edited field while editing, else the
     // section's focused field.
     let marked_field: Option<MeasurementField> =
-        editing_field.clone().or_else(|| match focused_section {
+        editing_field.clone().or_else(|| match ctx.focused_section {
             FocusedSection::Measurements { focused_field } => Some(focused_field.clone()),
             _ => None,
         });
@@ -193,16 +190,8 @@ fn render_measurements_section(
     let weight_value = log.and_then(|l| l.weight).map(|w| format!("{} lbs", w));
     let waist_value = log.and_then(|l| l.waist).map(|w| format!("{} in", w));
 
-    let base = Style::default().fg(Color::Yellow);
-    let mut spans: Vec<Span> = Vec::new();
-    let mut width: u16 = 0;
-    let mut caret_col: Option<u16> = None;
-
-    let weight_region = push_field(
-        &mut spans,
-        &mut caret_col,
-        &mut width,
-        base,
+    let mut row = RowBuilder::new(Style::default().fg(Color::Yellow));
+    let weight_region = row.push_field(
         marked_field.as_ref() == Some(&MeasurementField::Weight),
         "Weight: ",
         if editing_field == Some(MeasurementField::Weight) {
@@ -214,12 +203,8 @@ fn render_measurements_section(
         " lbs",
         "Press 'w' to add",
     );
-    push_span(&mut spans, &mut width, " | ".to_string(), base);
-    let waist_region = push_field(
-        &mut spans,
-        &mut caret_col,
-        &mut width,
-        base,
+    row.push(" | ".to_string());
+    let waist_region = row.push_field(
         marked_field.as_ref() == Some(&MeasurementField::Waist),
         "Waist Size: ",
         if editing_field == Some(MeasurementField::Waist) {
@@ -245,7 +230,8 @@ fn render_measurements_section(
         .padding(ratatui::widgets::Padding::horizontal(1));
     let inner = block.inner(area);
 
-    let measurements_widget = Paragraph::new(Line::from(spans)).block(block);
+    let caret_col = row.caret_col;
+    let measurements_widget = Paragraph::new(Line::from(row.spans)).block(block);
     f.render_widget(measurements_widget, area);
 
     if let Some(click_targets) = click_targets {
@@ -264,48 +250,72 @@ fn placeholder_style() -> Style {
     Style::default().fg(Color::DarkGray)
 }
 
-/// Pushes a styled span and advances the running display width (in cells) used
-/// for caret positioning.
-fn push_span(spans: &mut Vec<Span<'static>>, width: &mut u16, text: String, style: Style) {
-    *width += Span::raw(text.as_str()).width() as u16;
-    spans.push(Span::styled(text, style));
+/// Accumulates the styled spans for one section row (Measurements / Running),
+/// tracking the running display width (in cells) for caret math and the caret
+/// column when a field is edited in place. Bundling these mutable accumulators
+/// lets `push_field` take `&mut self` instead of three out-parameters.
+struct RowBuilder {
+    spans: Vec<Span<'static>>,
+    width: u16,
+    caret_col: Option<u16>,
+    base: Style,
 }
 
-/// Appends one labelled field to a section row, recording the caret column when
-/// the field is being edited in place. `marked` adds the ► focus marker; `edit`
-/// (when `Some`) substitutes the input buffer for the value and sets the caret.
-/// When `value` is `None` and the field isn't being edited, the dimmed `help`
-/// placeholder is shown in place of the value.
-fn push_field(
-    spans: &mut Vec<Span<'static>>,
-    caret_col: &mut Option<u16>,
-    width: &mut u16,
-    base_style: Style,
-    marked: bool,
-    label: &str,
-    edit: Option<&InPlaceEdit>,
-    value: Option<&str>,
-    unit: &str,
-    help: &str,
-) -> (u16, u16) {
-    let start = *width;
-    if marked {
-        push_span(spans, width, "► ".to_string(), base_style);
+impl RowBuilder {
+    fn new(base: Style) -> Self {
+        Self {
+            spans: Vec::new(),
+            width: 0,
+            caret_col: None,
+            base,
+        }
     }
-    push_span(spans, width, label.to_string(), base_style);
 
-    if let Some(edit) = edit {
-        // Caret sits within the buffer; digits/dots are width-1 so char count == cells.
-        *caret_col = Some(*width + edit.cursor as u16);
-        push_span(spans, width, edit.buffer.to_string(), base_style);
-        // Extra leading space so the block cursor doesn't sit flush against the unit.
-        push_span(spans, width, format!(" {}", unit), base_style);
-    } else if let Some(value) = value {
-        push_span(spans, width, value.to_string(), base_style);
-    } else {
-        push_span(spans, width, help.to_string(), placeholder_style());
+    /// Pushes text in the row's base style, advancing the display width.
+    fn push(&mut self, text: String) {
+        let style = self.base;
+        self.push_styled(text, style);
     }
-    (start, width.saturating_sub(start))
+
+    fn push_styled(&mut self, text: String, style: Style) {
+        self.width += Span::raw(text.as_str()).width() as u16;
+        self.spans.push(Span::styled(text, style));
+    }
+
+    /// Appends one labelled field to the row, recording the caret column when the
+    /// field is being edited in place. `marked` adds the ► focus marker; `edit`
+    /// (when `Some`) substitutes the input buffer for the value and sets the
+    /// caret. When `value` is `None` and the field isn't being edited, the dimmed
+    /// `help` placeholder is shown instead. Returns the field's `(start, width)`
+    /// for click-target geometry.
+    fn push_field(
+        &mut self,
+        marked: bool,
+        label: &str,
+        edit: Option<&InPlaceEdit>,
+        value: Option<&str>,
+        unit: &str,
+        help: &str,
+    ) -> (u16, u16) {
+        let start = self.width;
+        if marked {
+            self.push("► ".to_string());
+        }
+        self.push(label.to_string());
+
+        if let Some(edit) = edit {
+            // Caret sits within the buffer; digits/dots are width-1 so char count == cells.
+            self.caret_col = Some(self.width + edit.cursor as u16);
+            self.push(edit.buffer.to_string());
+            // Extra leading space so the block cursor doesn't sit flush against the unit.
+            self.push(format!(" {}", unit));
+        } else if let Some(value) = value {
+            self.push(value.to_string());
+        } else {
+            self.push_styled(help.to_string(), placeholder_style());
+        }
+        (start, self.width.saturating_sub(start))
+    }
 }
 
 fn push_field_target(
@@ -326,15 +336,16 @@ fn push_field_target(
 fn render_running_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
-    selected_date: NaiveDate,
-    daily_logs: &[DailyLog],
-    focused_section: &FocusedSection,
+    ctx: SectionCtx,
     yearly_miles: f32,
     monthly_miles: f32,
     edit: Option<&InPlaceEdit>,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let log = daily_logs.iter().find(|log| log.date == selected_date);
+    let log = ctx
+        .daily_logs
+        .iter()
+        .find(|log| log.date == ctx.selected_date);
 
     let editing_field = match edit.map(|e| e.field) {
         Some(FieldType::Miles) => Some(RunningField::Miles),
@@ -342,11 +353,11 @@ fn render_running_section(
         _ => None,
     };
 
-    let section_focused = matches!(focused_section, FocusedSection::Running { .. });
+    let section_focused = matches!(ctx.focused_section, FocusedSection::Running { .. });
     let has_focus = section_focused || editing_field.is_some();
 
     let marked_field: Option<RunningField> =
-        editing_field.clone().or_else(|| match focused_section {
+        editing_field.clone().or_else(|| match ctx.focused_section {
             FocusedSection::Running { focused_field } => Some(focused_field.clone()),
             _ => None,
         });
@@ -391,16 +402,8 @@ fn render_running_section(
         .and_then(|l| l.elevation_gain)
         .map(|e| format!("{} ft", e));
 
-    let base = Style::default().fg(Color::LightRed);
-    let mut spans: Vec<Span> = Vec::new();
-    let mut width: u16 = 0;
-    let mut caret_col: Option<u16> = None;
-
-    let miles_region = push_field(
-        &mut spans,
-        &mut caret_col,
-        &mut width,
-        base,
+    let mut row = RowBuilder::new(Style::default().fg(Color::LightRed));
+    let miles_region = row.push_field(
         marked_field.as_ref() == Some(&RunningField::Miles),
         "Miles: ",
         if editing_field == Some(RunningField::Miles) {
@@ -412,12 +415,8 @@ fn render_running_section(
         " mi",
         "Press 'm' to add",
     );
-    push_span(&mut spans, &mut width, " | ".to_string(), base);
-    let elevation_region = push_field(
-        &mut spans,
-        &mut caret_col,
-        &mut width,
-        base,
+    row.push(" | ".to_string());
+    let elevation_region = row.push_field(
         marked_field.as_ref() == Some(&RunningField::Elevation),
         "Elevation: ",
         if editing_field == Some(RunningField::Elevation) {
@@ -429,12 +428,7 @@ fn render_running_section(
         " ft",
         "Press 'l' to add",
     );
-    push_span(
-        &mut spans,
-        &mut width,
-        format!(" | {} | {}", yearly_text, monthly_text),
-        base,
-    );
+    row.push(format!(" | {} | {}", yearly_text, monthly_text));
 
     let border_style = if has_focus {
         Style::default().fg(Color::LightRed)
@@ -449,7 +443,8 @@ fn render_running_section(
         .padding(ratatui::widgets::Padding::horizontal(1));
     let inner = block.inner(area);
 
-    let running_widget = Paragraph::new(Line::from(spans)).block(block);
+    let caret_col = row.caret_col;
+    let running_widget = Paragraph::new(Line::from(row.spans)).block(block);
     f.render_widget(running_widget, area);
 
     if let Some(click_targets) = click_targets {
@@ -466,14 +461,15 @@ fn render_running_section(
 fn render_food_list_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
-    selected_date: NaiveDate,
-    daily_logs: &[DailyLog],
+    ctx: SectionCtx,
     food_list_state: &mut ListState,
-    focused_section: &FocusedSection,
     food_list_focused: bool,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let log = daily_logs.iter().find(|log| log.date == selected_date);
+    let log = ctx
+        .daily_logs
+        .iter()
+        .find(|log| log.date == ctx.selected_date);
     let entry_count = log.map_or(0, |log| log.food_entries.len());
 
     let items: Vec<ListItem> = if let Some(log) = log {
@@ -492,14 +488,14 @@ fn render_food_list_section(
         vec![ListItem::new("No food entries yet. Press 'f' to add one.")]
     };
 
-    let border_style = if matches!(focused_section, FocusedSection::FoodItems) {
+    let border_style = if matches!(ctx.focused_section, FocusedSection::FoodItems) {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
     let highlight_style =
-        if matches!(focused_section, FocusedSection::FoodItems) && food_list_focused {
+        if matches!(ctx.focused_section, FocusedSection::FoodItems) && food_list_focused {
             create_highlight_style()
         } else {
             Style::default()
@@ -535,22 +531,23 @@ fn render_food_list_section(
 fn render_sokay_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
-    selected_date: NaiveDate,
-    daily_logs: &[DailyLog],
+    ctx: SectionCtx,
     sokay_list_state: &mut ListState,
-    focused_section: &FocusedSection,
     sokay_list_focused: bool,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let log = daily_logs.iter().find(|log| log.date == selected_date);
+    let log = ctx
+        .daily_logs
+        .iter()
+        .find(|log| log.date == ctx.selected_date);
     let entry_count = log.map_or(0, |log| log.sokay_entries.len());
 
     // Calculate cumulative sokay count up to selected date
     let cumulative_sokay = crate::events::handlers::ActionHandler::calculate_cumulative_sokay(
         &crate::models::AppState {
             current_screen: crate::models::AppScreen::DailyView,
-            selected_date,
-            daily_logs: daily_logs.to_vec(),
+            selected_date: ctx.selected_date,
+            daily_logs: ctx.daily_logs.to_vec(),
             focused_section: FocusedSection::FoodItems,
             food_list_focused: false,
             sokay_list_focused: false,
@@ -562,7 +559,7 @@ fn render_sokay_section(
             frame_width: 0,
             frame_height: 0,
         },
-        selected_date,
+        ctx.selected_date,
     );
 
     let title = format!("Sokay (Total: {})", cumulative_sokay);
@@ -583,18 +580,18 @@ fn render_sokay_section(
         vec![ListItem::new("No sokay entries yet. Press 'c' to add one.")]
     };
 
-    let border_style = if matches!(focused_section, FocusedSection::Sokay) {
+    let border_style = if matches!(ctx.focused_section, FocusedSection::Sokay) {
         Style::default().fg(Color::Magenta)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
-    let highlight_style = if matches!(focused_section, FocusedSection::Sokay) && sokay_list_focused
-    {
-        create_highlight_style()
-    } else {
-        Style::default()
-    };
+    let highlight_style =
+        if matches!(ctx.focused_section, FocusedSection::Sokay) && sokay_list_focused {
+            create_highlight_style()
+        } else {
+            Style::default()
+        };
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -645,14 +642,15 @@ fn push_visible_list_targets(
 fn render_strength_mobility_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
-    selected_date: NaiveDate,
-    daily_logs: &[DailyLog],
-    focused_section: &FocusedSection,
+    ctx: SectionCtx,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let log = daily_logs.iter().find(|log| log.date == selected_date);
+    let log = ctx
+        .daily_logs
+        .iter()
+        .find(|log| log.date == ctx.selected_date);
 
-    let has_focus = matches!(focused_section, FocusedSection::StrengthMobility);
+    let has_focus = matches!(ctx.focused_section, FocusedSection::StrengthMobility);
 
     let sm_text = if let Some(log) = log {
         if let Some(sm) = &log.strength_mobility {
@@ -694,14 +692,15 @@ fn render_strength_mobility_section(
 fn render_notes_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
-    selected_date: NaiveDate,
-    daily_logs: &[DailyLog],
-    focused_section: &FocusedSection,
+    ctx: SectionCtx,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let log = daily_logs.iter().find(|log| log.date == selected_date);
+    let log = ctx
+        .daily_logs
+        .iter()
+        .find(|log| log.date == ctx.selected_date);
 
-    let has_focus = matches!(focused_section, FocusedSection::Notes);
+    let has_focus = matches!(ctx.focused_section, FocusedSection::Notes);
 
     let notes_text = if let Some(log) = log {
         if let Some(notes) = &log.notes {
