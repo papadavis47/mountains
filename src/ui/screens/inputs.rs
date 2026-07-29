@@ -1,9 +1,9 @@
 use ratatui::{Frame, style::Color, widgets::ListState};
 
-use crate::models::AppState;
-use crate::ui::modals::{render_input_modal, InputModalConfig};
 use super::daily_view::render_daily_view_screen;
 use super::home::render_home_screen;
+use crate::models::AppState;
+use crate::ui::modals::{InputModalConfig, render_input_modal};
 
 /// Renders the add food entry screen as a centered modal dialog
 pub fn render_add_food_screen(
@@ -15,7 +15,15 @@ pub fn render_add_food_screen(
     input_buffer: &str,
     cursor_position: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
     let title = format!("Add Food - {}", state.selected_date.format("%B %d, %Y"));
     let config = InputModalConfig::text(title, Color::Yellow);
@@ -32,7 +40,15 @@ pub fn render_edit_food_screen(
     input_buffer: &str,
     cursor_position: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
     let title = format!("Edit Food - {}", state.selected_date.format("%B %d, %Y"));
     let config = InputModalConfig::text(title, Color::Yellow);
@@ -49,9 +65,20 @@ pub fn render_edit_strength_mobility_screen(
     input_buffer: &str,
     cursor_position: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
-    let title = format!("Edit Strength & Mobility - {}", state.selected_date.format("%B %d, %Y"));
+    let title = format!(
+        "Edit Strength & Mobility - {}",
+        state.selected_date.format("%B %d, %Y")
+    );
     let config = InputModalConfig::multiline(title, Color::Cyan);
     render_input_modal(f, config, input_buffer, cursor_position);
 }
@@ -66,7 +93,15 @@ pub fn render_edit_notes_screen(
     input_buffer: &str,
     cursor_position: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
     let title = format!("Edit Notes - {}", state.selected_date.format("%B %d, %Y"));
     let config = InputModalConfig::multiline(title, Color::Green);
@@ -83,9 +118,20 @@ pub fn render_add_sokay_screen(
     input_buffer: &str,
     cursor_position: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
-    let title = format!("Add Sokay Entry - {}", state.selected_date.format("%B %d, %Y"));
+    let title = format!(
+        "Add Sokay Entry - {}",
+        state.selected_date.format("%B %d, %Y")
+    );
     let config = InputModalConfig::text(title, Color::Magenta);
     render_input_modal(f, config, input_buffer, cursor_position);
 }
@@ -119,9 +165,20 @@ pub fn render_edit_sokay_screen(
     input_buffer: &str,
     cursor_position: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
-    let title = format!("Edit Sokay Entry - {}", state.selected_date.format("%B %d, %Y"));
+    let title = format!(
+        "Edit Sokay Entry - {}",
+        state.selected_date.format("%B %d, %Y")
+    );
     let config = InputModalConfig::text(title, Color::Magenta);
     render_input_modal(f, config, input_buffer, cursor_position);
 }
@@ -437,13 +494,26 @@ mod tests {
     // -- calculate_cursor_in_wrapped_text ------------------------------------
 
     fn origin(w: u16, h: u16) -> Rect {
-        Rect { x: 0, y: 0, width: w, height: h }
+        Rect {
+            x: 0,
+            y: 0,
+            width: w,
+            height: h,
+        }
     }
 
     #[test]
     fn cursor_width_zero_returns_area_origin() {
-        let area = Rect { x: 5, y: 7, width: 20, height: 4 };
-        assert_eq!(calculate_cursor_in_wrapped_text(area, "hello", 3, 0), (5, 7));
+        let area = Rect {
+            x: 5,
+            y: 7,
+            width: 20,
+            height: 4,
+        };
+        assert_eq!(
+            calculate_cursor_in_wrapped_text(area, "hello", 3, 0),
+            (5, 7)
+        );
     }
 
     #[test]
@@ -491,8 +561,16 @@ mod tests {
 
     #[test]
     fn cursor_offset_applies_area_origin() {
-        let area = Rect { x: 4, y: 2, width: 20, height: 4 };
-        assert_eq!(calculate_cursor_in_wrapped_text(area, "hello", 5, 20), (9, 2));
+        let area = Rect {
+            x: 4,
+            y: 2,
+            width: 20,
+            height: 4,
+        };
+        assert_eq!(
+            calculate_cursor_in_wrapped_text(area, "hello", 5, 20),
+            (9, 2)
+        );
     }
 
     #[test]

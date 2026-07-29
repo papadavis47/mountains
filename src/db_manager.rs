@@ -139,7 +139,11 @@ impl DbManager {
         let stash_path = format!("{}.pre-sync.{}", db_path_str, timestamp);
 
         if std::fs::rename(db_path, &stash_path).is_ok() {
-            std::fs::rename(format!("{}-wal", db_path_str), format!("{}-wal", stash_path)).ok();
+            std::fs::rename(
+                format!("{}-wal", db_path_str),
+                format!("{}-wal", stash_path),
+            )
+            .ok();
         } else {
             // Rename failed; fall back to removal so replica creation can proceed
             std::fs::remove_file(db_path).ok();
@@ -504,8 +508,12 @@ mod tests {
         // Session 1: local-only db with two logged days, then stashed (as
         // upgrade_to_remote_replica would before replica creation)
         let mut db = DbManager::new_local_first(dir.path()).await.unwrap();
-        db.save_daily_log(&log("2026-07-01", "local-day1")).await.unwrap();
-        db.save_daily_log(&log("2026-07-02", "local-day2")).await.unwrap();
+        db.save_daily_log(&log("2026-07-01", "local-day1"))
+            .await
+            .unwrap();
+        db.save_daily_log(&log("2026-07-02", "local-day2"))
+            .await
+            .unwrap();
         db.stash_local_db(&db_path_str).await;
         drop(db);
         assert!(!db_path.exists());
@@ -514,17 +522,29 @@ mod tests {
         // Session 2: fresh db standing in for the pulled replica, already
         // holding 07-02 (as if another client wrote it)
         let mut db = DbManager::new_local_first(dir.path()).await.unwrap();
-        db.save_daily_log(&log("2026-07-02", "remote-day2")).await.unwrap();
+        db.save_daily_log(&log("2026-07-02", "remote-day2"))
+            .await
+            .unwrap();
         db.import_stashed_dbs(&db_path_str).await.unwrap();
 
         let logs = db.load_all_daily_logs().await.unwrap();
         assert_eq!(logs.len(), 2);
         // Stashed day absent from the db is imported with entries intact
-        let day1 = logs.iter().find(|l| l.notes.as_deref() == Some("local-day1")).unwrap();
+        let day1 = logs
+            .iter()
+            .find(|l| l.notes.as_deref() == Some("local-day1"))
+            .unwrap();
         assert_eq!(day1.food_entries[0].name, "food-local-day1");
         // Existing date wins over the stash
-        assert!(logs.iter().any(|l| l.notes.as_deref() == Some("remote-day2")));
-        assert!(!logs.iter().any(|l| l.notes.as_deref() == Some("local-day2-overwritten")));
+        assert!(
+            logs.iter()
+                .any(|l| l.notes.as_deref() == Some("remote-day2"))
+        );
+        assert!(
+            !logs
+                .iter()
+                .any(|l| l.notes.as_deref() == Some("local-day2-overwritten"))
+        );
 
         // Stash consumed after successful import
         assert!(DbManager::find_stashed_dbs(&db_path_str).is_empty());
@@ -551,12 +571,20 @@ mod tests {
     #[tokio::test]
     async fn import_across_multiple_stashes_newest_wins_collisions() {
         let dir = TempDir::new().unwrap();
-        let db_path_str = dir.path().join("mountains.db").to_str().unwrap().to_string();
+        let db_path_str = dir
+            .path()
+            .join("mountains.db")
+            .to_str()
+            .unwrap()
+            .to_string();
 
         make_stash(
             dir.path(),
             "mountains.db.pre-sync.100",
-            &[log("2026-07-01", "older-day1"), log("2026-07-02", "only-in-older")],
+            &[
+                log("2026-07-01", "older-day1"),
+                log("2026-07-02", "only-in-older"),
+            ],
         )
         .await;
         make_stash(
@@ -572,17 +600,32 @@ mod tests {
         let logs = db.load_all_daily_logs().await.unwrap();
         assert_eq!(logs.len(), 2);
         // Colliding date comes from the newest stash
-        assert!(logs.iter().any(|l| l.notes.as_deref() == Some("newer-day1")));
-        assert!(!logs.iter().any(|l| l.notes.as_deref() == Some("older-day1")));
+        assert!(
+            logs.iter()
+                .any(|l| l.notes.as_deref() == Some("newer-day1"))
+        );
+        assert!(
+            !logs
+                .iter()
+                .any(|l| l.notes.as_deref() == Some("older-day1"))
+        );
         // Date unique to the older stash still imported
-        assert!(logs.iter().any(|l| l.notes.as_deref() == Some("only-in-older")));
+        assert!(
+            logs.iter()
+                .any(|l| l.notes.as_deref() == Some("only-in-older"))
+        );
         assert!(DbManager::find_stashed_dbs(&db_path_str).is_empty());
     }
 
     #[tokio::test]
     async fn failed_import_leaves_stash_for_retry() {
         let dir = TempDir::new().unwrap();
-        let db_path_str = dir.path().join("mountains.db").to_str().unwrap().to_string();
+        let db_path_str = dir
+            .path()
+            .join("mountains.db")
+            .to_str()
+            .unwrap()
+            .to_string();
         let mut db = DbManager::new_local_first(dir.path()).await.unwrap();
 
         // Valid sqlite file lacking the schema: import errors reading it
@@ -606,7 +649,12 @@ mod tests {
     #[test]
     fn find_stashed_dbs_newest_first_and_skips_sidecar_files() {
         let dir = TempDir::new().unwrap();
-        let db_path_str = dir.path().join("mountains.db").to_str().unwrap().to_string();
+        let db_path_str = dir
+            .path()
+            .join("mountains.db")
+            .to_str()
+            .unwrap()
+            .to_string();
 
         for name in [
             "mountains.db.pre-sync.100",

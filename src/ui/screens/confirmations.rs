@@ -5,9 +5,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, ListState, Paragraph},
 };
 
+use super::daily_view::render_daily_view_screen;
 use crate::models::AppState;
 use crate::ui::components::{centered_rect, create_standard_layout, render_help, render_title};
-use super::daily_view::render_daily_view_screen;
 
 /// Renders the delete day confirmation screen
 pub fn render_confirm_delete_day_screen(f: &mut Frame, selected_date: NaiveDate) {
@@ -41,7 +41,13 @@ pub fn render_confirm_delete_day_screen(f: &mut Frame, selected_date: NaiveDate)
         .wrap(ratatui::widgets::Wrap { trim: false });
     f.render_widget(warning_widget, chunks[1]);
 
-    render_help(f, chunks[2], &["y: Delete Day | n/Esc: Cancel"], true, false);
+    render_help(
+        f,
+        chunks[2],
+        &["y: Delete Day | n/Esc: Cancel"],
+        true,
+        false,
+    );
 }
 
 /// Renders the delete food item confirmation dialog as a centered modal
@@ -53,7 +59,15 @@ pub fn render_confirm_delete_food_screen(
     sync_status: &str,
     food_index: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
     let food_name = if let Some(log) = state.get_daily_log(state.selected_date) {
         if food_index < log.food_entries.len() {
@@ -100,7 +114,15 @@ pub fn render_confirm_delete_sokay_screen(
     sync_status: &str,
     sokay_index: usize,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
     let sokay_text = if let Some(log) = state.get_daily_log(state.selected_date) {
         if sokay_index < log.sokay_entries.len() {

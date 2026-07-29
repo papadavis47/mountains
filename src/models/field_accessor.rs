@@ -18,7 +18,10 @@ impl FieldType {
                 FieldType::Weight => log.weight.map(|w| w.to_string()).unwrap_or_default(),
                 FieldType::Waist => log.waist.map(|w| w.to_string()).unwrap_or_default(),
                 FieldType::Miles => log.miles_covered.map(|m| m.to_string()).unwrap_or_default(),
-                FieldType::Elevation => log.elevation_gain.map(|e| e.to_string()).unwrap_or_default(),
+                FieldType::Elevation => log
+                    .elevation_gain
+                    .map(|e| e.to_string())
+                    .unwrap_or_default(),
                 FieldType::StrengthMobility => log.strength_mobility.clone().unwrap_or_default(),
                 FieldType::Notes => log.notes.clone().unwrap_or_default(),
             }

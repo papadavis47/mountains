@@ -5,9 +5,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Gauge, ListState, Paragraph},
 };
 
+use super::daily_view::render_daily_view_screen;
 use crate::models::AppState;
 use crate::ui::components::centered_rect;
-use super::daily_view::render_daily_view_screen;
 
 /// Renders the shortcuts help overlay on the daily view screen
 pub fn render_shortcuts_help_screen(
@@ -17,7 +17,15 @@ pub fn render_shortcuts_help_screen(
     sokay_list_state: &mut ListState,
     sync_status: &str,
 ) {
-    render_daily_view_screen(f, state, food_list_state, sokay_list_state, sync_status, None, None);
+    render_daily_view_screen(
+        f,
+        state,
+        food_list_state,
+        sokay_list_state,
+        sync_status,
+        None,
+        None,
+    );
 
     let shortcuts_text = "\
 Measurements:
@@ -48,12 +56,21 @@ Press Space or Esc to close this modal";
     // last line is never clipped, then center it within the screen.
     let area = f.area();
     let line_count = shortcuts_text.lines().count() as u16;
-    let content_width = shortcuts_text.lines().map(|l| l.chars().count()).max().unwrap_or(0) as u16;
+    let content_width = shortcuts_text
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0) as u16;
     let popup_height = (line_count + 4).min(area.height); // 2 border + 2 padding rows
     let popup_width = (content_width + 4).clamp(40.min(area.width), area.width); // 2 border + 2 padding cols
     let popup_x = area.x + area.width.saturating_sub(popup_width) / 2;
     let popup_y = area.y + area.height.saturating_sub(popup_height) / 2;
-    let popup_area = Rect { x: popup_x, y: popup_y, width: popup_width, height: popup_height };
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
 
     f.render_widget(Clear, popup_area);
 
@@ -94,7 +111,11 @@ pub fn render_syncing_screen(f: &mut Frame, sync_status: &str) {
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(border_color))
         .title(if is_offline { "Offline" } else { "Syncing" })
-        .title_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+        .title_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
         .padding(ratatui::widgets::Padding::uniform(1));
 
     let inner_area = block.inner(popup_area);
@@ -116,7 +137,11 @@ pub fn render_syncing_screen(f: &mut Frame, sync_status: &str) {
 
     if !is_offline {
         let gauge_percent = if is_complete { 100 } else { 50 };
-        let gauge_color = if is_complete { Color::Green } else { Color::Cyan };
+        let gauge_color = if is_complete {
+            Color::Green
+        } else {
+            Color::Cyan
+        };
 
         let gauge = Gauge::default()
             .gauge_style(Style::default().fg(gauge_color))
