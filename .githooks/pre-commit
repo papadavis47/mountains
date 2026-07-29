@@ -1,0 +1,21 @@
+#!/bin/sh
+# Pre-commit guard: keep the repo rustfmt- and clippy-clean.
+#
+# Checks the working tree (not just staged files), which matches a solo
+# whole-tree commit workflow. Bypass in a pinch with: git commit --no-verify
+#
+# Enabled once per clone with: git config core.hooksPath .githooks
+
+set -e
+
+if ! cargo fmt --check; then
+    echo "" >&2
+    echo "✗ rustfmt drift detected. Run 'cargo fmt', re-stage, and commit again." >&2
+    exit 1
+fi
+
+if ! cargo clippy --all-targets -- -D warnings; then
+    echo "" >&2
+    echo "✗ clippy reported warnings. Fix them, re-stage, and commit again." >&2
+    exit 1
+fi
