@@ -106,3 +106,94 @@ impl FileManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::FoodEntry;
+    use tempfile::TempDir;
+
+    // Build a FileManager rooted at a scratch dir instead of `~/.mountains`, so
+    // tests never touch the real home directory. The struct field is private but
+    // reachable here because tests live in the same module.
+    fn manager(dir: &TempDir) -> FileManager {
+        FileManager {
+            mountains_dir: dir.path().to_path_buf(),
+        }
+    }
+
+    fn full_log() -> DailyLog {
+        let mut log = DailyLog::new(NaiveDate::from_ymd_opt(2025, 1, 9).unwrap());
+        log.weight = Some(175.5);
+        log.waist = Some(34.2);
+        log.miles_covered = Some(3.2);
+        log.elevation_gain = Some(450);
+        log.add_food_entry(FoodEntry::new("Oatmeal".to_string()));
+        log.add_food_entry(FoodEntry::new("Chicken Salad".to_string()));
+        log.add_sokay_entry("Coca Cola".to_string());
+        log.strength_mobility = Some("Pull-ups: 3x8".to_string());
+        log.notes = Some("Feeling strong.".to_string());
+        log
+    }
+
+    #[test]
+    fn markdown_matches_documented_format() {
+        let md = manager(&TempDir::new().unwrap()).daily_log_to_markdown(&full_log());
+        assert!(md.starts_with("# Mountains Training Log - January 09, 2025\n\n"));
+        assert!(
+            md.contains("## Measurements\n- **Weight:** 175.5 lbs\n- **Waist:** 34.2 inches\n")
+        );
+        assert!(md.contains("## Food\n- Oatmeal\n- Chicken Salad\n"));
+        assert!(md.contains("## Running\n- **Miles:** 3.2 mi\n- **Elevation:** 450 ft\n"));
+        assert!(md.contains("## Sokay\n- Coca Cola\n"));
+        assert!(md.contains("## Strength & Mobility\nPull-ups: 3x8\n"));
+        assert!(md.contains("## Notes\nFeeling strong.\n"));
+    }
+
+    #[test]
+    fn markdown_omits_empty_sections_but_keeps_header() {
+        let log = DailyLog::new(NaiveDate::from_ymd_opt(2025, 1, 9).unwrap());
+        let md = manager(&TempDir::new().unwrap()).daily_log_to_markdown(&log);
+        assert!(md.starts_with("# Mountains Training Log - January 09, 2025"));
+        for section in [
+            "## Measurements",
+            "## Food",
+            "## Running",
+            "## Sokay",
+            "## Strength & Mobility",
+            "## Notes",
+        ] {
+            assert!(!md.contains(section), "unexpected section: {section}");
+        }
+    }
+
+    #[test]
+    fn measurements_section_shown_when_only_one_field_set() {
+        let mut log = DailyLog::new(NaiveDate::from_ymd_opt(2025, 1, 9).unwrap());
+        log.weight = Some(180.0);
+        let md = manager(&TempDir::new().unwrap()).daily_log_to_markdown(&log);
+        assert!(md.contains("## Measurements\n- **Weight:** 180 lbs\n"));
+        assert!(!md.contains("Waist"));
+    }
+
+    #[test]
+    fn save_writes_dated_file_then_delete_removes_it() {
+        let dir = TempDir::new().unwrap();
+        let fm = manager(&dir);
+        let log = full_log();
+        fm.save_daily_log(&log).unwrap();
+
+        let path = dir.path().join("mtslog-01.09.2025.md");
+        assert!(path.exists());
+        // File content is exactly the serialized markdown.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            fm.daily_log_to_markdown(&log)
+        );
+
+        fm.delete_daily_log(log.date).unwrap();
+        assert!(!path.exists());
+        // Deleting a missing file is a no-op, not an error.
+        assert!(fm.delete_daily_log(log.date).is_ok());
+    }
+}
