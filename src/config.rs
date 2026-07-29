@@ -2,34 +2,19 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// `Default` is derived: bool defaults to false and String to "", which is
+// exactly the "no cloud sync configured" state we want. Prefer deriving over a
+// hand-written impl whenever the field defaults already produce the right value.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub sync: SyncConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncConfig {
     pub enabled: bool,
     pub db_url: String,
     pub auth_token: String,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            sync: SyncConfig::default(),
-        }
-    }
-}
-
-impl Default for SyncConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            db_url: String::new(),
-            auth_token: String::new(),
-        }
-    }
 }
 
 impl SyncConfig {
@@ -215,7 +200,11 @@ mod tests {
     fn partial_config_fills_defaults() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[sync]\nenabled = true\ndb_url = \"\"\nauth_token = \"\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "[sync]\nenabled = true\ndb_url = \"\"\nauth_token = \"\"\n",
+        )
+        .unwrap();
         let config = AppConfig::load_from_path(&path).unwrap();
         assert!(config.sync.enabled);
         assert!(config.sync.db_url.is_empty());

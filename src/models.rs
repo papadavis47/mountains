@@ -162,7 +162,8 @@ impl AppState {
             &mut self.daily_logs[pos]
         } else {
             self.daily_logs.push(DailyLog::new(date));
-            self.daily_logs.sort_by(|a, b| b.date.cmp(&a.date));
+            self.daily_logs
+                .sort_by_key(|log| std::cmp::Reverse(log.date));
             self.daily_logs
                 .iter_mut()
                 .find(|log| log.date == date)
