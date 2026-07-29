@@ -7,6 +7,7 @@ mod events;
 mod file_manager;
 mod miles_stats;
 mod models;
+mod period;
 mod ui;
 
 use anyhow::Result;
@@ -47,11 +48,16 @@ async fn main() -> Result<()> {
 }
 
 const HELP_TEXT: &str = concat!(
-    env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"), "\n",
+    env!("CARGO_PKG_NAME"),
+    " ",
+    env!("CARGO_PKG_VERSION"),
+    "\n",
     "A terminal-based trail running and nutrition tracking application.\n",
     "\n",
     "USAGE:\n",
-    "    ", env!("CARGO_PKG_NAME"), " [OPTIONS]\n",
+    "    ",
+    env!("CARGO_PKG_NAME"),
+    " [OPTIONS]\n",
     "\n",
     "OPTIONS:\n",
     "    -h, --help       Print this help message\n",
@@ -67,21 +73,26 @@ const HELP_TEXT: &str = concat!(
 /// after printing; returns only when no recognized flag is present so the app
 /// can launch normally.
 fn handle_cli_args() {
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "-V" | "--version" => {
-                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
-                std::process::exit(0);
-            }
-            "-h" | "--help" => {
-                println!("{}", HELP_TEXT);
-                std::process::exit(0);
-            }
-            other => {
-                eprintln!("error: unrecognized argument '{}'\n", other);
-                eprintln!("{}", HELP_TEXT);
-                std::process::exit(2);
-            }
+    // The app accepts no combinable flags, so only the first argument matters.
+    // `nth(1)` skips argv[0] (the binary name); `let ... else` returns early when
+    // no argument was given, keeping the happy path unindented.
+    let Some(arg) = std::env::args().nth(1) else {
+        return;
+    };
+
+    match arg.as_str() {
+        "-V" | "--version" => {
+            println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+            std::process::exit(0);
+        }
+        "-h" | "--help" => {
+            println!("{}", HELP_TEXT);
+            std::process::exit(0);
+        }
+        other => {
+            eprintln!("error: unrecognized argument '{}'\n", other);
+            eprintln!("{}", HELP_TEXT);
+            std::process::exit(2);
         }
     }
 }

@@ -32,39 +32,77 @@ impl InputHandler {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        if self.cursor_position >= self.input_buffer.len() {
-            self.input_buffer.push(c);
-        } else {
-            self.input_buffer.insert(self.cursor_position, c);
-        }
-        self.cursor_position += 1;
+        // `cursor_position` is a *byte* offset (a `String` is indexed by bytes),
+        // so it must advance by the char's encoded width, not by 1. Advancing by
+        // 1 desyncs the cursor after any multi-byte char (e.g. 'é' is 2 bytes),
+        // and a later slice on a non-boundary byte index would panic.
+        self.input_buffer.insert(self.cursor_position, c);
+        self.cursor_position += c.len_utf8();
     }
 
     pub fn delete_char(&mut self) {
-        if self.cursor_position > 0 {
-            self.cursor_position -= 1;
-            if self.cursor_position < self.input_buffer.len() {
-                self.input_buffer.remove(self.cursor_position);
-            }
+        if self.cursor_position == 0 {
+            return;
         }
+        // Step back to the start of the preceding char, then remove the whole
+        // char there. `String::remove` requires a char-boundary byte index.
+        let prev = self.prev_char_boundary(self.cursor_position);
+        self.input_buffer.remove(prev);
+        self.cursor_position = prev;
     }
 
     pub fn delete_char_forward(&mut self) {
         if self.cursor_position < self.input_buffer.len() {
+            // cursor sits on a char boundary by invariant, so this removes the
+            // char under the cursor and leaves the cursor where it is.
             self.input_buffer.remove(self.cursor_position);
         }
     }
 
     pub fn move_cursor_left(&mut self) {
-        if self.cursor_position > 0 {
-            self.cursor_position -= 1;
-        }
+        self.cursor_position = self.prev_char_boundary(self.cursor_position);
     }
 
     pub fn move_cursor_right(&mut self) {
-        if self.cursor_position < self.input_buffer.len() {
-            self.cursor_position += 1;
+        self.cursor_position = self.next_char_boundary(self.cursor_position);
+    }
+
+    /// Byte index of the char boundary immediately before `byte_idx`
+    /// (returns 0 when already at the start).
+    fn prev_char_boundary(&self, byte_idx: usize) -> usize {
+        if byte_idx == 0 {
+            return 0;
         }
+        let mut i = byte_idx - 1;
+        while i > 0 && !self.input_buffer.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    }
+
+    /// Byte index of the char boundary immediately after `byte_idx`
+    /// (returns the buffer length when already at the end).
+    fn next_char_boundary(&self, byte_idx: usize) -> usize {
+        let len = self.input_buffer.len();
+        if byte_idx >= len {
+            return len;
+        }
+        let mut i = byte_idx + 1;
+        while i < len && !self.input_buffer.is_char_boundary(i) {
+            i += 1;
+        }
+        i
+    }
+
+    /// Largest char boundary `<= byte_idx`. Used to snap a byte-column computed
+    /// during vertical movement back onto a valid boundary so it never lands
+    /// mid-char.
+    fn floor_char_boundary(&self, byte_idx: usize) -> usize {
+        let mut i = byte_idx.min(self.input_buffer.len());
+        while i > 0 && !self.input_buffer.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
     }
 
     pub fn move_cursor_home(&mut self) {
@@ -84,73 +122,44 @@ impl InputHandler {
         true
     }
 
+    /// Handles the editing keys common to every input mode (deletion, horizontal
+    /// movement, Home/End). Returns `true` if `key` was one of them, so each
+    /// public handler can try its mode-specific keys first and delegate the rest
+    /// here — the single place this shared behavior lives.
+    fn handle_edit_key(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Backspace => self.delete_char(),
+            KeyCode::Delete => self.delete_char_forward(),
+            KeyCode::Left => self.move_cursor_left(),
+            KeyCode::Right => self.move_cursor_right(),
+            KeyCode::Home => self.move_cursor_home(),
+            KeyCode::End => self.move_cursor_end(),
+            _ => return false,
+        }
+        true
+    }
+
     pub fn handle_text_input(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Char(c) => {
                 self.insert_char(c);
                 true
             }
-            KeyCode::Backspace => {
-                self.delete_char();
-                true
-            }
-            KeyCode::Delete => {
-                self.delete_char_forward();
-                true
-            }
-            KeyCode::Left => {
-                self.move_cursor_left();
-                true
-            }
-            KeyCode::Right => {
-                self.move_cursor_right();
-                true
-            }
-            KeyCode::Home => {
-                self.move_cursor_home();
-                true
-            }
-            KeyCode::End => {
-                self.move_cursor_end();
-                true
-            }
-            _ => false,
+            _ => self.handle_edit_key(key),
         }
     }
 
     pub fn handle_numeric_input(&mut self, key: KeyCode) -> bool {
         match key {
+            // A rejected char still "consumes" the key (returns true) so callers
+            // don't fall through to other handling; only the insert is skipped.
             KeyCode::Char(c) => {
                 if c.is_ascii_digit() || c == '.' {
                     self.insert_char(c);
                 }
                 true
             }
-            KeyCode::Backspace => {
-                self.delete_char();
-                true
-            }
-            KeyCode::Delete => {
-                self.delete_char_forward();
-                true
-            }
-            KeyCode::Left => {
-                self.move_cursor_left();
-                true
-            }
-            KeyCode::Right => {
-                self.move_cursor_right();
-                true
-            }
-            KeyCode::Home => {
-                self.move_cursor_home();
-                true
-            }
-            KeyCode::End => {
-                self.move_cursor_end();
-                true
-            }
-            _ => false,
+            _ => self.handle_edit_key(key),
         }
     }
 
@@ -162,31 +171,7 @@ impl InputHandler {
                 }
                 true
             }
-            KeyCode::Backspace => {
-                self.delete_char();
-                true
-            }
-            KeyCode::Delete => {
-                self.delete_char_forward();
-                true
-            }
-            KeyCode::Left => {
-                self.move_cursor_left();
-                true
-            }
-            KeyCode::Right => {
-                self.move_cursor_right();
-                true
-            }
-            KeyCode::Home => {
-                self.move_cursor_home();
-                true
-            }
-            KeyCode::End => {
-                self.move_cursor_end();
-                true
-            }
-            _ => false,
+            _ => self.handle_edit_key(key),
         }
     }
 
@@ -194,22 +179,6 @@ impl InputHandler {
         match key {
             KeyCode::Char(c) => {
                 self.insert_char(c);
-                true
-            }
-            KeyCode::Backspace => {
-                self.delete_char();
-                true
-            }
-            KeyCode::Delete => {
-                self.delete_char_forward();
-                true
-            }
-            KeyCode::Left => {
-                self.move_cursor_left();
-                true
-            }
-            KeyCode::Right => {
-                self.move_cursor_right();
                 true
             }
             KeyCode::Up => {
@@ -220,15 +189,7 @@ impl InputHandler {
                 self.move_cursor_down();
                 true
             }
-            KeyCode::Home => {
-                self.move_cursor_home();
-                true
-            }
-            KeyCode::End => {
-                self.move_cursor_end();
-                true
-            }
-            _ => false,
+            _ => self.handle_edit_key(key),
         }
     }
 
@@ -255,7 +216,7 @@ impl InputHandler {
             let prev_line_length = prev_line_end - prev_line_start;
 
             let new_column = std::cmp::min(current_column, prev_line_length);
-            self.cursor_position = prev_line_start + new_column;
+            self.cursor_position = self.floor_char_boundary(prev_line_start + new_column);
         } else {
             self.cursor_position = 0;
         }
@@ -291,7 +252,7 @@ impl InputHandler {
 
             let next_line_length = next_line_end - next_line_start;
             let new_column = std::cmp::min(current_column, next_line_length);
-            self.cursor_position = next_line_start + new_column;
+            self.cursor_position = self.floor_char_boundary(next_line_start + new_column);
         } else {
             self.cursor_position = total_length;
         }
@@ -598,6 +559,107 @@ impl ActionHandler {
 mod tests {
     use super::*;
 
+    mod input_handler {
+        use super::*;
+
+        #[test]
+        fn inserts_ascii_and_tracks_cursor() {
+            let mut h = InputHandler::new();
+            for c in "abc".chars() {
+                h.insert_char(c);
+            }
+            assert_eq!(h.input_buffer, "abc");
+            assert_eq!(h.cursor_position, 3);
+        }
+
+        #[test]
+        fn multibyte_insert_advances_cursor_by_utf8_width() {
+            let mut h = InputHandler::new();
+            h.insert_char('é'); // 2 bytes in UTF-8
+            assert_eq!(h.cursor_position, 2);
+            h.insert_char('x');
+            assert_eq!(h.input_buffer, "éx");
+            assert_eq!(h.cursor_position, 3);
+        }
+
+        #[test]
+        fn backspace_removes_whole_multibyte_char() {
+            let mut h = InputHandler::new();
+            h.set_input("aé".to_string()); // cursor at end (byte 3)
+            h.delete_char();
+            assert_eq!(h.input_buffer, "a");
+            assert_eq!(h.cursor_position, 1);
+            h.delete_char();
+            assert_eq!(h.input_buffer, "");
+            assert_eq!(h.cursor_position, 0);
+            h.delete_char(); // no-op at start
+            assert_eq!(h.cursor_position, 0);
+        }
+
+        #[test]
+        fn horizontal_movement_lands_on_char_boundaries() {
+            let mut h = InputHandler::new();
+            h.set_input("aé".to_string());
+            h.move_cursor_home();
+            h.move_cursor_right(); // past 'a'
+            assert_eq!(h.cursor_position, 1);
+            h.move_cursor_right(); // past 'é' (2 bytes)
+            assert_eq!(h.cursor_position, 3);
+            h.move_cursor_right(); // clamped at end
+            assert_eq!(h.cursor_position, 3);
+            h.move_cursor_left();
+            assert_eq!(h.cursor_position, 1);
+        }
+
+        #[test]
+        fn delete_forward_removes_char_under_cursor() {
+            let mut h = InputHandler::new();
+            h.set_input("aé".to_string());
+            h.move_cursor_home();
+            h.delete_char_forward();
+            assert_eq!(h.input_buffer, "é");
+            assert_eq!(h.cursor_position, 0);
+        }
+
+        #[test]
+        fn numeric_input_rejects_letters_but_still_consumes_key() {
+            let mut h = InputHandler::new();
+            assert!(h.handle_numeric_input(KeyCode::Char('1')));
+            assert!(h.handle_numeric_input(KeyCode::Char('.')));
+            assert!(h.handle_numeric_input(KeyCode::Char('a'))); // consumed, not inserted
+            assert_eq!(h.input_buffer, "1.");
+        }
+
+        #[test]
+        fn integer_input_rejects_decimal_point() {
+            let mut h = InputHandler::new();
+            h.handle_integer_input(KeyCode::Char('1'));
+            h.handle_integer_input(KeyCode::Char('.'));
+            h.handle_integer_input(KeyCode::Char('2'));
+            assert_eq!(h.input_buffer, "12");
+        }
+
+        #[test]
+        fn shared_edit_keys_work_across_modes() {
+            let mut h = InputHandler::new();
+            h.set_input("12".to_string());
+            assert!(h.handle_numeric_input(KeyCode::Backspace));
+            assert_eq!(h.input_buffer, "1");
+            // Up is not an edit key in single-line text mode, so it is not consumed.
+            assert!(!h.handle_text_input(KeyCode::Up));
+        }
+
+        #[test]
+        fn vertical_movement_lands_on_char_boundary() {
+            let mut h = InputHandler::new();
+            h.set_input("abc\ndé".to_string());
+            h.move_cursor_up();
+            assert!(h.input_buffer.is_char_boundary(h.cursor_position));
+            h.move_cursor_down();
+            assert!(h.input_buffer.is_char_boundary(h.cursor_position));
+        }
+    }
+
     mod navigation_handler {
         use super::*;
 
@@ -725,6 +787,100 @@ mod tests {
                 SectionNavigator::field_section(FieldType::Notes),
                 FocusedSection::Notes
             );
+        }
+    }
+
+    mod action_handler {
+        use super::*;
+
+        fn date(y: i32, m: u32, d: u32) -> chrono::NaiveDate {
+            chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+        }
+
+        #[test]
+        fn save_food_entry_adds_and_rejects_empty() {
+            let mut state = AppState::new();
+            // Empty name is a no-op returning None (nothing to persist).
+            assert!(ActionHandler::save_food_entry(&mut state, String::new()).is_none());
+
+            let log = ActionHandler::save_food_entry(&mut state, "Eggs".to_string()).unwrap();
+            assert_eq!(log.food_entries.len(), 1);
+            assert_eq!(log.food_entries[0].name, "Eggs");
+        }
+
+        #[test]
+        fn update_food_entry_respects_index_and_bounds() {
+            let mut state = AppState::new();
+            ActionHandler::save_food_entry(&mut state, "Eggs".to_string());
+
+            let log = ActionHandler::update_food_entry(&mut state, 0, "Bacon".to_string()).unwrap();
+            assert_eq!(log.food_entries[0].name, "Bacon");
+            // Empty replacement and out-of-range index both reject.
+            assert!(ActionHandler::update_food_entry(&mut state, 0, String::new()).is_none());
+            assert!(ActionHandler::update_food_entry(&mut state, 9, "X".to_string()).is_none());
+        }
+
+        #[test]
+        fn delete_food_entry_removes_and_bounds() {
+            let mut state = AppState::new();
+            ActionHandler::save_food_entry(&mut state, "Eggs".to_string());
+            assert!(ActionHandler::delete_food_entry(&mut state, 9).is_none());
+
+            let log = ActionHandler::delete_food_entry(&mut state, 0).unwrap();
+            assert!(log.food_entries.is_empty());
+        }
+
+        #[test]
+        fn sokay_add_update_delete_cycle() {
+            let mut state = AppState::new();
+            assert!(ActionHandler::save_sokay_entry(&mut state, String::new()).is_none());
+            ActionHandler::save_sokay_entry(&mut state, "Soda".to_string()).unwrap();
+
+            let log =
+                ActionHandler::update_sokay_entry(&mut state, 0, "Candy".to_string()).unwrap();
+            assert_eq!(log.sokay_entries[0], "Candy");
+            assert!(ActionHandler::update_sokay_entry(&mut state, 5, "X".to_string()).is_none());
+
+            let log = ActionHandler::delete_sokay_entry(&mut state, 0).unwrap();
+            assert!(log.sokay_entries.is_empty());
+        }
+
+        #[test]
+        fn cumulative_sokay_counts_up_to_and_including_date() {
+            let mut state = AppState::new();
+            state
+                .get_or_create_daily_log(date(2026, 7, 1))
+                .add_sokay_entry("a".to_string());
+            state
+                .get_or_create_daily_log(date(2026, 7, 2))
+                .add_sokay_entry("b".to_string());
+            state
+                .get_or_create_daily_log(date(2026, 7, 2))
+                .add_sokay_entry("c".to_string());
+            state
+                .get_or_create_daily_log(date(2026, 7, 3))
+                .add_sokay_entry("d".to_string());
+
+            // Boundary is inclusive: through 07-02 counts the 07-01 and both 07-02 entries.
+            assert_eq!(
+                ActionHandler::calculate_cumulative_sokay(&state, date(2026, 7, 2)),
+                3
+            );
+            assert_eq!(
+                ActionHandler::calculate_cumulative_sokay(&state, date(2026, 7, 3)),
+                4
+            );
+        }
+
+        #[test]
+        fn home_enter_with_index_selects_that_day() {
+            let mut state = AppState::new();
+            let d = date(2026, 6, 1);
+            state.get_or_create_daily_log(d);
+
+            ActionHandler::handle_home_enter(&mut state, Some(0));
+            assert_eq!(state.selected_date, d);
+            assert!(matches!(state.current_screen, AppScreen::DailyView));
         }
     }
 }

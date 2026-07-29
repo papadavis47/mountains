@@ -1,5 +1,6 @@
 use crate::models::DailyLog;
-use chrono::{Datelike, NaiveDate};
+use crate::period::Period;
+use chrono::NaiveDate;
 
 /// Rounds to one decimal place, normalizing negative zero to positive zero.
 /// An empty `f32` sum yields `-0.0` (std's additive identity), which would
@@ -9,37 +10,29 @@ fn round_tenths(total: f32) -> f32 {
     if rounded == 0.0 { 0.0 } else { rounded }
 }
 
-pub fn calculate_weekly_miles(logs: &[DailyLog], reference_date: NaiveDate) -> f32 {
-    let current_week = reference_date.iso_week();
+/// Totals `miles_covered` over the logs falling in `period` (relative to
+/// `reference_date`). `filter_map` drops the `None` entries in one pass, so days
+/// with no mileage don't need a separate guard.
+fn sum_miles(logs: &[DailyLog], reference_date: NaiveDate, period: Period) -> f32 {
     let total: f32 = logs
         .iter()
-        .filter(|log| log.date.iso_week() == current_week)
+        .filter(|log| period.contains(log.date, reference_date))
         .filter_map(|log| log.miles_covered)
         .sum();
 
     round_tenths(total)
+}
+
+pub fn calculate_weekly_miles(logs: &[DailyLog], reference_date: NaiveDate) -> f32 {
+    sum_miles(logs, reference_date, Period::Week)
 }
 
 pub fn calculate_monthly_miles(logs: &[DailyLog], reference_date: NaiveDate) -> f32 {
-    let total: f32 = logs
-        .iter()
-        .filter(|log| {
-            log.date.year() == reference_date.year() && log.date.month() == reference_date.month()
-        })
-        .filter_map(|log| log.miles_covered)
-        .sum();
-
-    round_tenths(total)
+    sum_miles(logs, reference_date, Period::Month)
 }
 
 pub fn calculate_yearly_miles(logs: &[DailyLog], reference_date: NaiveDate) -> f32 {
-    let total: f32 = logs
-        .iter()
-        .filter(|log| log.date.year() == reference_date.year())
-        .filter_map(|log| log.miles_covered)
-        .sum();
-
-    round_tenths(total)
+    sum_miles(logs, reference_date, Period::Year)
 }
 
 #[cfg(test)]

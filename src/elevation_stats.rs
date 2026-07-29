@@ -1,40 +1,37 @@
 use crate::models::DailyLog;
-use chrono::{Datelike, NaiveDate};
+use crate::period::Period;
+use chrono::NaiveDate;
 
 const ELEVATION_THRESHOLD: i32 = 1000;
 
 pub fn count_monthly_1000_days(logs: &[DailyLog], reference_date: NaiveDate) -> usize {
     logs.iter()
         .filter(|log| {
-            log.date.year() == reference_date.year()
-                && log.date.month() == reference_date.month()
+            Period::Month.contains(log.date, reference_date)
                 && log.elevation_gain.unwrap_or(0) >= ELEVATION_THRESHOLD
         })
         .count()
 }
 
-pub fn calculate_weekly_elevation(logs: &[DailyLog], reference_date: NaiveDate) -> i32 {
-    let current_week = reference_date.iso_week();
+/// Sums `elevation_gain` over the logs falling in `period` (relative to
+/// `reference_date`). Unlike miles this stays an integer with no rounding.
+fn sum_elevation(logs: &[DailyLog], reference_date: NaiveDate, period: Period) -> i32 {
     logs.iter()
-        .filter(|log| log.date.iso_week() == current_week)
+        .filter(|log| period.contains(log.date, reference_date))
         .filter_map(|log| log.elevation_gain)
         .sum()
+}
+
+pub fn calculate_weekly_elevation(logs: &[DailyLog], reference_date: NaiveDate) -> i32 {
+    sum_elevation(logs, reference_date, Period::Week)
 }
 
 pub fn calculate_monthly_elevation(logs: &[DailyLog], reference_date: NaiveDate) -> i32 {
-    logs.iter()
-        .filter(|log| {
-            log.date.year() == reference_date.year() && log.date.month() == reference_date.month()
-        })
-        .filter_map(|log| log.elevation_gain)
-        .sum()
+    sum_elevation(logs, reference_date, Period::Month)
 }
 
 pub fn calculate_yearly_elevation(logs: &[DailyLog], reference_date: NaiveDate) -> i32 {
-    logs.iter()
-        .filter(|log| log.date.year() == reference_date.year())
-        .filter_map(|log| log.elevation_gain)
-        .sum()
+    sum_elevation(logs, reference_date, Period::Year)
 }
 
 /// Returns streak count only if active (extends to most recent logged day)
@@ -44,7 +41,9 @@ pub fn calculate_current_streak(logs: &[DailyLog]) -> Option<usize> {
     }
 
     let mut sorted_logs = logs.to_vec();
-    sorted_logs.sort_by(|a, b| b.date.cmp(&a.date));
+    // `Reverse` flips the ordering key, giving newest-first without a custom
+    // closure — the idiomatic way to sort descending.
+    sorted_logs.sort_by_key(|log| std::cmp::Reverse(log.date));
 
     let most_recent_date = sorted_logs.first()?.date;
 
