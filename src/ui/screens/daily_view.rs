@@ -117,8 +117,9 @@ pub fn render_daily_view_screen(
 
     let help_tiers: &[&str] = if edit.is_some() {
         &[
-            " Editing — type value | Enter: Save | Esc: Cancel",
-            " Enter: Save | Esc: Cancel",
+            " Editing — type value | Tab: Save & Toggle | Enter: Save & Next | Esc: Cancel",
+            " Tab: Save & Toggle | Enter: Save & Next | Esc: Cancel",
+            " Enter/Tab: Save | Esc: Cancel",
         ]
     } else {
         &[
@@ -919,6 +920,43 @@ fn render_notes_expanded(
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn numeric_edit_help_includes_tab_save_and_toggle() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = AppState::new();
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+        let edit = InPlaceEdit {
+            field: FieldType::Weight,
+            buffer: "175.5",
+            cursor: 5,
+        };
+
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    &state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    Some(edit),
+                    None,
+                );
+            })
+            .unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Tab: Save & Toggle"));
+    }
 
     #[test]
     fn daily_view_registers_each_numeric_field() {

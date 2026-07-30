@@ -108,6 +108,18 @@ impl FileManager {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::FileManager;
+    use std::path::Path;
+
+    pub fn manager(path: &Path) -> FileManager {
+        FileManager {
+            mountains_dir: path.to_path_buf(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::FoodEntry;

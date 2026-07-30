@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::field_accessor::FieldType;
 
 impl App {
     pub(super) async fn handle_add_food_input(&mut self, key: KeyCode) -> Result<()> {
@@ -66,8 +67,6 @@ impl App {
         modifiers: crossterm::event::KeyModifiers,
         field_type: crate::models::field_accessor::FieldType,
     ) -> Result<()> {
-        use crate::models::field_accessor::FieldType;
-
         match key {
             KeyCode::Enter => {
                 let is_multiline =
@@ -80,29 +79,27 @@ impl App {
                     // Insert newline and stay in edit mode
                     self.input_handler.insert_newline();
                 } else {
-                    // Save and exit
                     let entered = !self.input_handler.input_buffer.trim().is_empty();
-                    let log = ActionHandler::update_field(
-                        &mut self.state,
-                        field_type,
-                        self.input_handler.input_buffer.clone(),
-                    );
-                    self.input_handler.clear();
-
                     // After entering data, move focus to the next field so entry
                     // flows top-to-bottom without manual Shift+J. An empty save
                     // stays put. Focus-only — the next field isn't auto-opened.
-                    self.state.focused_section = if entered {
+                    let next_focus = if entered {
                         SectionNavigator::advance_field(field_type)
                     } else {
                         SectionNavigator::field_section(field_type)
                     };
-                    self.state.strength_mobility_scroll = 0;
-                    self.state.notes_scroll = 0;
-                    self.state.current_screen = AppScreen::DailyView;
-
-                    self.spawn_persist(log);
+                    self.save_field_and_focus(field_type, next_focus);
                 }
+            }
+            KeyCode::Tab
+                if matches!(
+                    field_type,
+                    FieldType::Weight | FieldType::Waist | FieldType::Miles | FieldType::Elevation
+                ) =>
+            {
+                let current_focus = SectionNavigator::field_section(field_type);
+                let paired_focus = SectionNavigator::toggle_internal_focus(&current_focus);
+                self.save_field_and_focus(field_type, paired_focus);
             }
             KeyCode::Esc => {
                 self.input_handler.clear();
@@ -122,6 +119,20 @@ impl App {
             },
         }
         Ok(())
+    }
+
+    fn save_field_and_focus(&mut self, field_type: FieldType, next_focus: FocusedSection) {
+        let log = ActionHandler::update_field(
+            &mut self.state,
+            field_type,
+            self.input_handler.input_buffer.clone(),
+        );
+        self.input_handler.clear();
+        self.state.focused_section = next_focus;
+        self.state.strength_mobility_scroll = 0;
+        self.state.notes_scroll = 0;
+        self.state.current_screen = AppScreen::DailyView;
+        self.spawn_persist(log);
     }
 
     pub(super) async fn handle_add_sokay_input(&mut self, key: KeyCode) -> Result<()> {
@@ -384,5 +395,105 @@ impl App {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file_manager::test_support;
+    use crossterm::event::KeyModifiers;
+    use tempfile::TempDir;
+
+    async fn test_app(dir: &TempDir) -> App {
+        let db_manager = DbManager::new_local_first(dir.path()).await.unwrap();
+        App {
+            state: AppState::new(),
+            config: AppConfig::default(),
+            db_manager: Arc::new(RwLock::new(db_manager)),
+            file_manager: test_support::manager(dir.path()),
+            input_handler: InputHandler::new(),
+            list_state: ListState::default(),
+            food_list_state: ListState::default(),
+            sokay_list_state: ListState::default(),
+            should_quit: false,
+            sync_status: String::new(),
+            config_url_buffer: String::new(),
+            config_token_buffer: String::new(),
+            config_sync_enabled: false,
+            click_targets: Vec::new(),
+            needs_reload: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[tokio::test]
+    async fn tab_saves_numeric_fields_and_toggles_within_each_pair() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        let cases = [
+            (
+                FieldType::Weight,
+                "175.5",
+                FocusedSection::Measurements {
+                    focused_field: MeasurementField::Waist,
+                },
+            ),
+            (
+                FieldType::Waist,
+                "34.25",
+                FocusedSection::Measurements {
+                    focused_field: MeasurementField::Weight,
+                },
+            ),
+            (
+                FieldType::Miles,
+                "7.2",
+                FocusedSection::Running {
+                    focused_field: RunningField::Elevation,
+                },
+            ),
+            (
+                FieldType::Elevation,
+                "1400",
+                FocusedSection::Running {
+                    focused_field: RunningField::Miles,
+                },
+            ),
+        ];
+
+        for (field, input, expected_focus) in cases {
+            app.state.current_screen = AppScreen::InputField(field);
+            app.input_handler.set_input(input.to_string());
+
+            app.handle_field_input(KeyCode::Tab, KeyModifiers::NONE, field)
+                .await
+                .unwrap();
+
+            assert_eq!(field.get_value(&app.state), input);
+            assert_eq!(app.state.focused_section, expected_focus);
+            assert!(matches!(app.state.current_screen, AppScreen::DailyView));
+            assert!(app.input_handler.input_buffer.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn enter_keeps_advancing_to_the_next_field() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        app.state.current_screen = AppScreen::InputField(FieldType::Waist);
+        app.input_handler.set_input("34.25".to_string());
+
+        app.handle_field_input(KeyCode::Enter, KeyModifiers::NONE, FieldType::Waist)
+            .await
+            .unwrap();
+
+        assert_eq!(FieldType::Waist.get_value(&app.state), "34.25");
+        assert_eq!(
+            app.state.focused_section,
+            FocusedSection::Running {
+                focused_field: RunningField::Miles,
+            }
+        );
+        assert!(matches!(app.state.current_screen, AppScreen::DailyView));
     }
 }
