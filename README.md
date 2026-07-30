@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./images/mountains-logo.svg" width="128" alt="Mountains logo">
+</p>
+
 # Mountains
 
 ## For mindfulness and motivation on the trails
