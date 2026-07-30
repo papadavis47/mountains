@@ -12,6 +12,8 @@ pub struct HelpRegion {
     pub area: Rect,
 }
 
+const TITLE_LOGO: &str = "▂▄▆█▆▄▂";
+
 pub fn create_title_style() -> Style {
     Style::default()
         .fg(Color::Green)
@@ -39,6 +41,7 @@ pub fn create_standard_layout(area: Rect) -> std::rc::Rc<[Rect]> {
 }
 
 pub fn render_title(f: &mut Frame, area: Rect, title: &str) {
+    let title = format!("{TITLE_LOGO}  {title}");
     let title_widget = Paragraph::new(title).style(create_title_style()).block(
         Block::default()
             .borders(Borders::ALL)
@@ -205,12 +208,34 @@ pub fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
 
     const TIERS: &[&str] = &[
         "Shift+J/K: Section | Enter: Add | Space: Shortcuts | Esc: Back",
         "Enter: Add | Space: More | Esc: Back",
         "Esc: Back",
     ];
+
+    #[test]
+    fn render_title_prefixes_bottom_aligned_logo_with_title_style() {
+        let backend = TestBackend::new(40, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| render_title(frame, frame.area(), "Sample Title"))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered: String = (2..=22).map(|x| buffer[(x, 2)].symbol()).collect();
+        assert_eq!(rendered, "▂▄▆█▆▄▂  Sample Title");
+
+        for x in 2..=8 {
+            let cell = &buffer[(x, 2)];
+            assert_eq!(cell.fg, Color::Green);
+            assert!(cell.modifier.contains(Modifier::BOLD));
+        }
+        assert_eq!(buffer[(11, 2)].fg, Color::Green);
+    }
 
     #[test]
     fn choose_help_tier_picks_full_when_it_fits() {
