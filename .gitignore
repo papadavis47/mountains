@@ -8,7 +8,7 @@
 .env.*.local
 .env.production
 
-# CookieJar local database (user's personal data)
+# Local database and config dir (user's personal data)
 .mountains/
 
 # Editor/IDE files
