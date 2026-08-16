@@ -27,7 +27,27 @@ pub fn render_shortcuts_help_screen(
         None,
     );
 
-    let shortcuts_text = "\
+    let shortcuts_text = if state.simple_mode {
+        "\
+Activity:
+  m - Edit miles covered
+  l - Edit elevation gain
+
+Nutrition:
+  f - Add food item
+
+Training:
+  n - Edit daily notes
+  Alt+Enter - Insert newline (in multiline fields)
+
+Press Enter to save entry, or Esc to exit field
+
+With any focused section, press Enter to place cursor
+
+
+Press Space or Esc to close this modal"
+    } else {
+        "\
 Measurements:
   w - Edit weight
   s - Edit waist size
@@ -50,7 +70,8 @@ Press Enter to save entry, or Esc to exit field
 With any focused section, press Enter to place cursor
 
 
-Press Space or Esc to close this modal";
+Press Space or Esc to close this modal"
+    };
 
     // Size the popup to the content (plus border + top/bottom padding) so the
     // last line is never clipped, then center it within the screen.
@@ -154,5 +175,43 @@ pub fn render_syncing_screen(f: &mut Frame, sync_status: &str) {
             .style(Style::default().fg(Color::Rgb(255, 165, 0)))
             .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(offline_note, chunks[1]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    // The Space overlay must only list shortcuts that work in the current
+    // mode: simple mode drops weight/waist/sokay/strength entries.
+    #[test]
+    fn simple_mode_shortcuts_overlay_omits_hidden_section_keys() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut state = AppState::new();
+        state.simple_mode = true;
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+
+        terminal
+            .draw(|frame| {
+                render_shortcuts_help_screen(frame, &state, &mut food_state, &mut sokay_state, "");
+            })
+            .unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Edit miles covered"));
+        assert!(rendered.contains("Edit daily notes"));
+        assert!(!rendered.contains("weight"));
+        assert!(!rendered.contains("waist"));
+        assert!(!rendered.contains("sokay"));
+        assert!(!rendered.contains("strength"));
     }
 }

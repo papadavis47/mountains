@@ -14,8 +14,10 @@ impl App {
                         // Reset scroll when leaving expanded sections
                         self.state.strength_mobility_scroll = 0;
                         self.state.notes_scroll = 0;
-                        self.state.focused_section =
-                            SectionNavigator::move_focus_down(&self.state.focused_section);
+                        self.state.focused_section = SectionNavigator::move_focus_down(
+                            &self.state.focused_section,
+                            self.state.simple_mode,
+                        );
                     }
                     return Ok(());
                 }
@@ -24,8 +26,10 @@ impl App {
                         // Reset scroll when leaving expanded sections
                         self.state.strength_mobility_scroll = 0;
                         self.state.notes_scroll = 0;
-                        self.state.focused_section =
-                            SectionNavigator::move_focus_up(&self.state.focused_section);
+                        self.state.focused_section = SectionNavigator::move_focus_up(
+                            &self.state.focused_section,
+                            self.state.simple_mode,
+                        );
                     }
                     return Ok(());
                 }
@@ -136,19 +140,25 @@ impl App {
                 }
             }
             KeyCode::Char('w') => {
-                if matches!(self.state.current_screen, AppScreen::DailyView) {
+                if matches!(self.state.current_screen, AppScreen::DailyView)
+                    && self.daily_view_key_enabled('w')
+                {
                     self.handle_edit_weight();
                 }
             }
             KeyCode::Char('s') => {
                 if matches!(self.state.current_screen, AppScreen::Startup) {
                     self.state.current_screen = AppScreen::Statistics;
-                } else if matches!(self.state.current_screen, AppScreen::DailyView) {
+                } else if matches!(self.state.current_screen, AppScreen::DailyView)
+                    && self.daily_view_key_enabled('s')
+                {
                     self.handle_edit_waist();
                 }
             }
             KeyCode::Char('t') => {
-                if matches!(self.state.current_screen, AppScreen::DailyView) {
+                if matches!(self.state.current_screen, AppScreen::DailyView)
+                    && self.daily_view_key_enabled('t')
+                {
                     self.handle_edit_strength_mobility();
                 }
             }
@@ -175,16 +185,18 @@ impl App {
             }
             KeyCode::Char('c') => {
                 if matches!(self.state.current_screen, AppScreen::DailyView) {
-                    self.state.current_screen = AppScreen::AddSokay;
+                    if self.daily_view_key_enabled('c') {
+                        self.state.current_screen = AppScreen::AddSokay;
+                    }
                 } else if matches!(self.state.current_screen, AppScreen::Startup) {
                     self.open_config_sync();
                 }
             }
             KeyCode::Char('S') => {
-                if matches!(
-                    self.state.current_screen,
-                    AppScreen::Home | AppScreen::DailyView
-                ) {
+                if matches!(self.state.current_screen, AppScreen::Home)
+                    || (matches!(self.state.current_screen, AppScreen::DailyView)
+                        && self.daily_view_key_enabled('S'))
+                {
                     self.state.current_screen = AppScreen::Startup;
                 }
             }
@@ -409,11 +421,17 @@ impl App {
                     self.sokay_list_state.select(None);
                 }
                 _ => {
-                    self.state.current_screen = AppScreen::Home;
+                    self.state.go_home_from_daily_view();
                 }
             },
             _ => {}
         }
+    }
+
+    /// DailyView keys pass through `SectionNavigator::daily_view_key_enabled`
+    /// so simple mode can disable the ones that reach hidden sections.
+    fn daily_view_key_enabled(&self, key: char) -> bool {
+        SectionNavigator::daily_view_key_enabled(key, self.state.simple_mode)
     }
 
     pub(super) fn handle_edit_food(&mut self) {

@@ -43,6 +43,12 @@ pub fn render_daily_view_screen(
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
     let mut click_targets = click_targets;
+
+    if state.simple_mode {
+        render_simple_daily_view(f, state, food_list_state, sync_status, edit, click_targets);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -154,6 +160,104 @@ pub fn render_daily_view_screen(
             );
         }
         _ => {}
+    }
+}
+
+/// Renders the `-s` quick-entry variant of the daily view: a centered window
+/// holding only the Running, Food, and Notes sections. Sections hidden here
+/// (Measurements, Sokay, Strength & Mobility) register no click targets, so
+/// mouse support stays consistent with what is drawn.
+fn render_simple_daily_view(
+    f: &mut Frame,
+    state: &AppState,
+    food_list_state: &mut ListState,
+    sync_status: &str,
+    edit: Option<InPlaceEdit>,
+    mut click_targets: Option<&mut Vec<ClickTarget>>,
+) {
+    let window = crate::ui::components::centered_rect(f.area(), 70, 85);
+    f.render_widget(Clear, window);
+
+    let frame_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Green))
+        .padding(ratatui::widgets::Padding::new(3, 3, 1, 1));
+    let inner = frame_block.inner(window);
+    f.render_widget(frame_block, window);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // Title
+            Constraint::Length(3), // Running (Miles, Elevation)
+            Constraint::Min(4),    // Food list (scrollable)
+            Constraint::Length(4), // Notes section
+            Constraint::Length(3), // Help
+        ])
+        .split(inner);
+
+    let title = format!(
+        "Quick Entry - {} {}",
+        state.selected_date.format("%B %d, %Y"),
+        sync_status
+    );
+    render_title(f, chunks[0], &title);
+
+    let ctx = SectionCtx {
+        selected_date: state.selected_date,
+        daily_logs: &state.daily_logs,
+        focused_section: &state.focused_section,
+    };
+
+    let today = chrono::Local::now().date_naive();
+    let yearly_miles = calculate_yearly_miles(&state.daily_logs, today);
+    let monthly_miles = calculate_monthly_miles(&state.daily_logs, today);
+    render_running_section(
+        f,
+        chunks[1],
+        ctx,
+        yearly_miles,
+        monthly_miles,
+        edit.as_ref(),
+        click_targets.as_deref_mut(),
+    );
+
+    render_food_list_section(
+        f,
+        chunks[2],
+        ctx,
+        food_list_state,
+        state.food_list_focused,
+        click_targets.as_deref_mut(),
+    );
+
+    render_notes_section(f, chunks[3], ctx, click_targets.as_deref_mut());
+
+    let help_tiers: &[&str] = if edit.is_some() {
+        &[
+            " Editing — type value | Tab: Save & Toggle | Enter: Save & Next | Esc: Cancel",
+            " Tab: Save & Toggle | Enter: Save & Next | Esc: Cancel",
+            " Enter/Tab: Save | Esc: Cancel",
+        ]
+    } else {
+        &[
+            " Shift+J/K: Section | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | Space: Shortcuts | Esc: Back",
+            " Shift+J/K: Section | Enter: Add | e: Edit | d: Delete | Space: More | Esc: Back",
+            " Space: Shortcuts | Esc: Back",
+        ]
+    };
+    render_help(f, chunks[4], help_tiers, true, false);
+
+    if matches!(state.focused_section, FocusedSection::Notes) {
+        render_notes_expanded(
+            f,
+            chunks[3],
+            state.selected_date,
+            &state.daily_logs,
+            state.notes_scroll,
+            click_targets,
+        );
     }
 }
 
@@ -557,6 +661,7 @@ fn render_sokay_section(
             date_input_error: None,
             config_sync_focused_field: crate::models::ConfigSyncField::DbUrl,
             config_sync_status: None,
+            simple_mode: false,
             frame_width: 0,
             frame_height: 0,
         },
@@ -1035,6 +1140,135 @@ mod tests {
             targets.last().map(|target| &target.action),
             Some(&ClickAction::Notes)
         );
+    }
+
+    // Simple mode (`-s`): only Running, Food, and Notes render, inside a
+    // centered window instead of the full-screen layout.
+    #[test]
+    fn simple_mode_hides_sections_and_centers_window() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut state = AppState::new();
+        state.simple_mode = true;
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+        let mut targets = Vec::new();
+
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    &state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    None,
+                    Some(&mut targets),
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(rendered.contains("Miles"));
+        assert!(rendered.contains("Food"));
+        assert!(rendered.contains("Notes"));
+        assert!(!rendered.contains("Weight"));
+        assert!(!rendered.contains("Sokay"));
+        assert!(!rendered.contains("Strength"));
+
+        // Centered window: the far-left column stays empty.
+        for y in 0..40 {
+            assert_eq!(buffer[(0, y)].symbol(), " ");
+        }
+
+        // Click targets exist only for what was drawn.
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.action == ClickAction::EditField(FieldType::Miles))
+        );
+        assert!(
+            !targets
+                .iter()
+                .any(|t| t.action == ClickAction::EditField(FieldType::Weight))
+        );
+    }
+
+    // The window keeps a padding gap between its border and the content, so
+    // the section/title blocks never sit flush against the frame.
+    #[test]
+    fn simple_mode_window_pads_between_border_and_content() {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut state = AppState::new();
+        state.simple_mode = true;
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    &state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    None,
+                    None,
+                );
+            })
+            .unwrap();
+
+        // centered_rect(120x40, 70, 85) -> window x 18..102, y 3..37; the
+        // window border occupies x=18/x=101, so with 3 columns of horizontal
+        // padding the columns just inside the border must stay empty.
+        let buffer = terminal.backend().buffer();
+        for y in 4..36 {
+            for x in [19, 20, 21, 98, 99, 100] {
+                assert_eq!(buffer[(x, y)].symbol(), " ", "cell ({x},{y}) not blank");
+            }
+        }
+        // One row of vertical padding above the title and below the help bar.
+        for x in 19..101 {
+            assert_eq!(buffer[(x, 4)].symbol(), " ");
+            assert_eq!(buffer[(x, 35)].symbol(), " ");
+        }
+    }
+
+    // Simple mode footer drops the startup key; full mode keeps it.
+    #[test]
+    fn simple_mode_help_omits_startup_key() {
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut state = AppState::new();
+        state.simple_mode = true;
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    &state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    None,
+                    None,
+                );
+            })
+            .unwrap();
+
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(!rendered.contains("S: Startup"));
+        assert!(rendered.contains("Esc: Back"));
     }
 
     #[test]

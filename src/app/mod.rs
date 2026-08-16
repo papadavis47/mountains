@@ -111,6 +111,12 @@ impl App {
         })
     }
 
+    /// Applies the CLI-selected launch mode after logs are loaded, so `-t`/`-s`
+    /// can open today's DailyView directly instead of the Startup screen.
+    pub fn apply_launch_mode(&mut self, mode: crate::models::LaunchMode) {
+        self.state.apply_launch_mode(mode);
+    }
+
     /// Main event loop
     pub async fn run(
         &mut self,

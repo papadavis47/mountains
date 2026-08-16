@@ -84,7 +84,7 @@ impl App {
                     // flows top-to-bottom without manual Shift+J. An empty save
                     // stays put. Focus-only — the next field isn't auto-opened.
                     let next_focus = if entered {
-                        SectionNavigator::advance_field(field_type)
+                        SectionNavigator::advance_field(field_type, self.state.simple_mode)
                     } else {
                         SectionNavigator::field_section(field_type)
                     };
