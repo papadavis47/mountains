@@ -339,6 +339,7 @@ impl App {
                         )
                         .await?;
                     }
+                    self.spawn_sync();
                     self.state.current_screen = AppScreen::Home;
                     self.list_state.select(None);
                 }
@@ -401,30 +402,9 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_manager::test_support;
+    use crate::app::test_support::test_app;
     use crossterm::event::KeyModifiers;
     use tempfile::TempDir;
-
-    async fn test_app(dir: &TempDir) -> App {
-        let db_manager = DbManager::new_local_first(dir.path()).await.unwrap();
-        App {
-            state: AppState::new(),
-            config: AppConfig::default(),
-            db_manager: Arc::new(RwLock::new(db_manager)),
-            file_manager: test_support::manager(dir.path()),
-            input_handler: InputHandler::new(),
-            list_state: ListState::default(),
-            food_list_state: ListState::default(),
-            sokay_list_state: ListState::default(),
-            should_quit: false,
-            sync_status: String::new(),
-            config_url_buffer: String::new(),
-            config_token_buffer: String::new(),
-            config_sync_enabled: false,
-            click_targets: Vec::new(),
-            needs_reload: Arc::new(AtomicBool::new(false)),
-        }
-    }
 
     #[tokio::test]
     async fn tab_saves_numeric_fields_and_toggles_within_each_pair() {

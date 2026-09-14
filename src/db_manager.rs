@@ -115,8 +115,12 @@ impl DbManager {
         }
     }
 
-    pub async fn get_connection_state(&self) -> ConnectionState {
-        self.connection_state.read().await.clone()
+    /// Hands out the connection-state handle so callers can watch sync status
+    /// without taking a lock on the whole `DbManager`. The `Arc` is never
+    /// replaced — `upgrade_to_remote_replica` writes through it — so a clone
+    /// taken at startup stays current for the life of the process.
+    pub fn connection_state_handle(&self) -> Arc<RwLock<ConnectionState>> {
+        Arc::clone(&self.connection_state)
     }
 
     /// Moves the local database files aside before replica creation. The stash name
@@ -354,9 +358,6 @@ impl DbManager {
         // Commit the transaction
         tx.commit().await.context("Failed to commit transaction")?;
 
-        // Trigger manual sync after save
-        self.sync().await;
-
         Ok(())
     }
 
@@ -435,17 +436,6 @@ impl DbManager {
     }
 
     /// Best-effort sync after save/delete operations
-    async fn sync(&self) {
-        // Only sync if we're connected to Turso
-        let state = self.connection_state.read().await;
-        if *state != ConnectionState::Connected {
-            return; // Skip sync if not connected
-        }
-        drop(state); // Release lock before sync
-
-        let _ = self.db.sync().await; // Ignore sync errors - best effort
-    }
-
     /// Explicit sync with Turso Cloud (called on shutdown)
     pub async fn sync_now(&self) -> Result<()> {
         // Only sync if we're connected to Turso
@@ -478,9 +468,6 @@ impl DbManager {
 
         // Commit the transaction
         tx.commit().await.context("Failed to commit transaction")?;
-
-        // Trigger manual sync after deletion
-        self.sync().await;
 
         Ok(())
     }

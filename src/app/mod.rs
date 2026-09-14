@@ -21,6 +21,9 @@ pub struct App {
     state: AppState,
     config: AppConfig,
     db_manager: Arc<RwLock<DbManager>>,
+    /// Cloud connection status, shared with `DbManager` rather than read through
+    /// it, so the render loop never contends with an in-flight database write.
+    connection_state: Arc<RwLock<ConnectionState>>,
     file_manager: FileManager,
     input_handler: InputHandler,
     list_state: ListState,
@@ -50,6 +53,37 @@ mod input;
 mod navigation;
 mod render;
 
+#[cfg(test)]
+pub(super) mod test_support {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Builds an `App` backed by a throwaway local database under `dir`, so tests
+    /// can drive real handlers without touching the user's `~/.mountains` data.
+    pub(crate) async fn test_app(dir: &TempDir) -> App {
+        let db_manager = DbManager::new_local_first(dir.path()).await.unwrap();
+        let connection_state = db_manager.connection_state_handle();
+        App {
+            state: AppState::new(),
+            config: AppConfig::default(),
+            db_manager: Arc::new(RwLock::new(db_manager)),
+            connection_state,
+            file_manager: crate::file_manager::test_support::manager(dir.path()),
+            input_handler: InputHandler::new(),
+            list_state: ListState::default(),
+            food_list_state: ListState::default(),
+            sokay_list_state: ListState::default(),
+            should_quit: false,
+            sync_status: String::new(),
+            config_url_buffer: String::new(),
+            config_token_buffer: String::new(),
+            config_sync_enabled: false,
+            click_targets: Vec::new(),
+            needs_reload: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
 impl App {
     /// Creates app with instant startup, spawns background cloud sync if configured
     pub async fn new(config: AppConfig) -> Result<Self> {
@@ -66,6 +100,7 @@ impl App {
         let mut state = AppState::new();
         state.daily_logs = db_manager.load_all_daily_logs().await?;
 
+        let connection_state = db_manager.connection_state_handle();
         let db_manager = Arc::new(RwLock::new(db_manager));
         let needs_reload = Arc::new(AtomicBool::new(false));
 
@@ -96,6 +131,7 @@ impl App {
             state,
             config,
             db_manager,
+            connection_state,
             file_manager,
             input_handler: InputHandler::new(),
             list_state: ListState::default(),
@@ -191,6 +227,16 @@ impl App {
         });
     }
 
+    /// Pushes locally committed changes to Turso on a detached task, taking only a
+    /// read lock so the render loop is never excluded during the network call.
+    fn spawn_sync(&self) {
+        let db_manager = Arc::clone(&self.db_manager);
+        tokio::spawn(async move {
+            let db = db_manager.read().await;
+            let _ = db.sync_now().await;
+        });
+    }
+
     /// Reloads the daily_logs cache from the local replica once the background
     /// cloud-sync task signals it has pulled new rows from the primary. Cheap
     /// no-op on every other iteration; the local read only runs when flagged.
@@ -203,8 +249,7 @@ impl App {
     }
 
     async fn update_sync_status(&mut self) {
-        let db = self.db_manager.read().await;
-        let state = db.get_connection_state().await;
+        let state = self.connection_state.read().await.clone();
 
         self.sync_status = match state {
             ConnectionState::Disconnected => "⚪ Offline".to_string(),
@@ -215,13 +260,11 @@ impl App {
 
     /// Performs shutdown sync and updates sync_status with result
     pub async fn perform_shutdown_sync(&mut self) {
-        let db = self.db_manager.read().await;
-        let connection_state = db.get_connection_state().await;
+        let connection_state = self.connection_state.read().await.clone();
 
         match connection_state {
             ConnectionState::Connected => {
                 self.sync_status = "Syncing with Turso Cloud...".to_string();
-                drop(db);
 
                 let db = self.db_manager.read().await;
                 match db.sync_now().await {
@@ -241,5 +284,45 @@ impl App {
         }
 
         self.should_quit = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tempfile::TempDir;
+    use tokio::sync::Notify;
+
+    /// The render loop refreshes the sync status at the top of every iteration. If
+    /// that read waited on the `DbManager` lock, an in-flight persist holding the
+    /// write lock across its network sync would freeze drawing and input handling.
+    #[tokio::test]
+    async fn sync_status_refreshes_while_a_persist_holds_the_db_write_lock() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_support::test_app(&dir).await;
+
+        let holding = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let holder = {
+            let db_manager = Arc::clone(&app.db_manager);
+            let holding = Arc::clone(&holding);
+            let release = Arc::clone(&release);
+            tokio::spawn(async move {
+                let _guard = db_manager.write().await;
+                holding.notify_one();
+                release.notified().await;
+            })
+        };
+
+        holding.notified().await;
+
+        tokio::time::timeout(Duration::from_secs(2), app.update_sync_status())
+            .await
+            .expect("sync status must not wait on the database lock");
+
+        release.notify_one();
+        holder.await.unwrap();
+        assert_eq!(app.sync_status, "⚪ Offline");
     }
 }

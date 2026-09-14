@@ -452,9 +452,17 @@ impl ActionHandler {
         file_manager: &FileManager,
         log: DailyLog,
     ) {
-        let mut db = db_manager.write().await;
-        let _ = db.save_daily_log(&log).await;
+        {
+            let mut db = db_manager.write().await;
+            let _ = db.save_daily_log(&log).await;
+        }
         let _ = file_manager.save_daily_log(&log);
+
+        // The write lock is released first: pushing to Turso is a network
+        // round-trip, and holding an exclusive lock across it would stall every
+        // other reader — including the render loop — until the request returns.
+        let db = db_manager.read().await;
+        let _ = db.sync_now().await;
     }
 
     pub fn update_food_entry(

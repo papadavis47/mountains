@@ -16,3 +16,4 @@ toml = "1.0"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1.42", features = ["time"] }
