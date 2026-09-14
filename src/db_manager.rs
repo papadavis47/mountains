@@ -435,7 +435,6 @@ impl DbManager {
         Ok(daily_logs)
     }
 
-    /// Best-effort sync after save/delete operations
     /// Explicit sync with Turso Cloud (called on shutdown)
     pub async fn sync_now(&self) -> Result<()> {
         // Only sync if we're connected to Turso
