@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Padding, Paragraph},
+    widgets::{Block, BorderType, Borders, ListItem, Padding, Paragraph},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,6 +26,22 @@ pub fn create_input_style() -> Style {
 
 pub fn create_highlight_style() -> Style {
     Style::default().add_modifier(Modifier::REVERSED)
+}
+
+/// Builds a list row whose selection highlight hugs the text.
+///
+/// `List::highlight_style` (and `ListItem::style`) restyle the whole row rect, which
+/// stretches the highlight across the section on a wide terminal. Styling the item's
+/// own span instead paints only the cells the text occupies, plus one trailing space.
+pub fn selectable_list_item<'a>(text: String, selected: bool) -> ListItem<'a> {
+    if selected {
+        ListItem::new(Line::from(Span::styled(
+            format!("{text} "),
+            create_highlight_style(),
+        )))
+    } else {
+        ListItem::new(Line::from(text))
+    }
 }
 
 pub fn create_standard_layout(area: Rect) -> std::rc::Rc<[Rect]> {
