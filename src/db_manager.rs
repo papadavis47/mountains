@@ -435,7 +435,7 @@ impl DbManager {
         Ok(daily_logs)
     }
 
-    /// Explicit sync with Turso Cloud (called on shutdown)
+    /// Explicit sync with Turso Cloud, called on shutdown and after every save.
     pub async fn sync_now(&self) -> Result<()> {
         // Only sync if we're connected to Turso
         let state = self.connection_state.read().await;
