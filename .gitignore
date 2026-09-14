@@ -27,6 +27,3 @@ chalk_board.md
 
 # Learning notes (local only)
 learning/*
-
-# Project-specific Claude instructions (keep local only)
-.claude/CLAUDE.md
