@@ -5,7 +5,7 @@ use ratatui::{
 
 use crate::models::AppState;
 use crate::ui::components::{
-    create_highlight_style, create_standard_layout, render_help, render_title,
+    create_standard_layout, render_help, render_title, selectable_list_item,
 };
 use crate::ui::{ClickAction, ClickTarget};
 
@@ -32,9 +32,10 @@ pub fn render_home_screen(
         state
             .daily_logs
             .iter()
-            .map(|log| {
+            .enumerate()
+            .map(|(index, log)| {
                 let date_str = log.date.format("%B %d, %Y").to_string();
-                ListItem::new(date_str)
+                selectable_list_item(date_str, list_state.selected() == Some(index))
             })
             .collect()
     };
@@ -45,9 +46,7 @@ pub fn render_home_screen(
         .title("Daily Training Logs")
         .padding(ratatui::widgets::Padding::uniform(1));
     let list_inner = block.inner(chunks[1]);
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(create_highlight_style());
+    let list = List::new(items).block(block);
 
     f.render_stateful_widget(list, chunks[1], list_state);
 
@@ -89,7 +88,7 @@ pub fn render_home_screen(
 mod tests {
     use super::*;
     use chrono::NaiveDate;
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::{Terminal, backend::TestBackend, style::Modifier};
 
     #[test]
     fn click_targets_follow_the_stateful_lists_scroll_offset() {
@@ -145,5 +144,48 @@ mod tests {
             .unwrap();
 
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn selection_highlight_hugs_the_row_text() {
+        let mut state = AppState::new();
+        state.daily_logs = (1..=3)
+            .rev()
+            .map(|day| crate::models::DailyLog::new(NaiveDate::from_ymd_opt(2026, 7, day).unwrap()))
+            .collect();
+        let mut list_state = ListState::default();
+        list_state.select(Some(1));
+        let backend = TestBackend::new(80, 16);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_home_screen(frame, &state, &mut list_state, "", None);
+            })
+            .unwrap();
+
+        let highlighted = reversed_cells(terminal.backend().buffer());
+        let rows: std::collections::BTreeSet<u16> = highlighted.iter().map(|&(_, y)| y).collect();
+        assert_eq!(rows.len(), 1, "only the selected row should be highlighted");
+        assert_eq!(
+            highlighted.len(),
+            "July 02, 2026".len() + 1,
+            "highlight should cover the text plus a single trailing space"
+        );
+    }
+
+    fn reversed_cells(buffer: &ratatui::buffer::Buffer) -> Vec<(u16, u16)> {
+        let area = buffer.area;
+        let mut cells = Vec::new();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = buffer.cell((x, y))
+                    && cell.modifier.contains(Modifier::REVERSED)
+                {
+                    cells.push((x, y));
+                }
+            }
+        }
+        cells
     }
 }

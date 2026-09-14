@@ -10,7 +10,7 @@ use ratatui::{
 use crate::miles_stats::{calculate_monthly_miles, calculate_yearly_miles};
 use crate::models::field_accessor::FieldType;
 use crate::models::{AppState, DailyLog, FocusedSection, MeasurementField, RunningField};
-use crate::ui::components::{create_highlight_style, render_help, render_title};
+use crate::ui::components::{render_help, render_title, selectable_list_item};
 use crate::ui::{ClickAction, ClickTarget};
 
 /// Active in-place edit of a numeric field, rendered directly inside its section
@@ -577,15 +577,23 @@ fn render_food_list_section(
         .find(|log| log.date == ctx.selected_date);
     let entry_count = log.map_or(0, |log| log.food_entries.len());
 
+    let food_selected =
+        if matches!(ctx.focused_section, FocusedSection::FoodItems) && food_list_focused {
+            food_list_state.selected()
+        } else {
+            None
+        };
+
     let items: Vec<ListItem> = if let Some(log) = log {
         if log.food_entries.is_empty() {
             vec![ListItem::new("No food entries yet. Press 'f' to add one.")]
         } else {
             log.food_entries
                 .iter()
-                .map(|entry| {
+                .enumerate()
+                .map(|(index, entry)| {
                     let display = format!("- {}", entry.name);
-                    ListItem::new(display)
+                    selectable_list_item(display, food_selected == Some(index))
                 })
                 .collect()
         }
@@ -599,22 +607,13 @@ fn render_food_list_section(
         Style::default().fg(Color::DarkGray)
     };
 
-    let highlight_style =
-        if matches!(ctx.focused_section, FocusedSection::FoodItems) && food_list_focused {
-            create_highlight_style()
-        } else {
-            Style::default()
-        };
-
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
         .title("Food Items")
         .padding(ratatui::widgets::Padding::uniform(1));
     let inner = block.inner(area);
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(highlight_style);
+    let list = List::new(items).block(block);
     f.render_stateful_widget(list, area, food_list_state);
 
     if let Some(click_targets) = click_targets {
@@ -670,15 +669,23 @@ fn render_sokay_section(
 
     let title = format!("Sokay (Total: {})", cumulative_sokay);
 
+    let sokay_selected =
+        if matches!(ctx.focused_section, FocusedSection::Sokay) && sokay_list_focused {
+            sokay_list_state.selected()
+        } else {
+            None
+        };
+
     let items: Vec<ListItem> = if let Some(log) = log {
         if log.sokay_entries.is_empty() {
             vec![ListItem::new("No sokay entries yet. Press 'c' to add one.")]
         } else {
             log.sokay_entries
                 .iter()
-                .map(|entry| {
+                .enumerate()
+                .map(|(index, entry)| {
                     let display = format!("- {}", entry);
-                    ListItem::new(display)
+                    selectable_list_item(display, sokay_selected == Some(index))
                 })
                 .collect()
         }
@@ -692,22 +699,13 @@ fn render_sokay_section(
         Style::default().fg(Color::DarkGray)
     };
 
-    let highlight_style =
-        if matches!(ctx.focused_section, FocusedSection::Sokay) && sokay_list_focused {
-            create_highlight_style()
-        } else {
-            Style::default()
-        };
-
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
         .title(title)
         .padding(ratatui::widgets::Padding::uniform(1));
     let inner = block.inner(area);
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(highlight_style);
+    let list = List::new(items).block(block);
     f.render_stateful_widget(list, area, sokay_list_state);
 
     if let Some(click_targets) = click_targets {
@@ -1295,5 +1293,88 @@ mod tests {
         );
         assert_eq!(targets[0].area.y, 10);
         assert_eq!(targets[2].area.y, 12);
+    }
+
+    fn state_with_food() -> AppState {
+        let mut state = AppState::new();
+        let mut log = crate::models::DailyLog::new(state.selected_date);
+        log.food_entries = vec![
+            crate::models::FoodEntry::new("Oatmeal".to_string()),
+            crate::models::FoodEntry::new("Chicken Salad".to_string()),
+        ];
+        state.daily_logs = vec![log];
+        state
+    }
+
+    #[test]
+    fn food_selection_highlight_hugs_the_row_text() {
+        let mut state = state_with_food();
+        state.focused_section = FocusedSection::FoodItems;
+        state.food_list_focused = true;
+        let mut food_state = ListState::default();
+        food_state.select(Some(1));
+        let mut sokay_state = ListState::default();
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    &state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    None,
+                    None,
+                );
+            })
+            .unwrap();
+
+        let highlighted = reversed_cells(terminal.backend().buffer());
+        let rows: std::collections::BTreeSet<u16> = highlighted.iter().map(|&(_, y)| y).collect();
+        assert_eq!(rows.len(), 1, "only the selected row should be highlighted");
+        assert_eq!(highlighted.len(), "- Chicken Salad".len() + 1);
+    }
+
+    #[test]
+    fn unfocused_food_list_draws_no_highlight() {
+        let state = state_with_food();
+        let mut food_state = ListState::default();
+        food_state.select(Some(1));
+        let mut sokay_state = ListState::default();
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    &state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    None,
+                    None,
+                );
+            })
+            .unwrap();
+
+        assert!(reversed_cells(terminal.backend().buffer()).is_empty());
+    }
+
+    fn reversed_cells(buffer: &ratatui::buffer::Buffer) -> Vec<(u16, u16)> {
+        let area = buffer.area;
+        let mut cells = Vec::new();
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = buffer.cell((x, y))
+                    && cell.modifier.contains(ratatui::style::Modifier::REVERSED)
+                {
+                    cells.push((x, y));
+                }
+            }
+        }
+        cells
     }
 }
