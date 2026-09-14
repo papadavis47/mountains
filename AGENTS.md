@@ -4,7 +4,7 @@ A terminal-based training and nutrition tracking application built with Rust and
 
 Current release: **v0.9.1**.
 
-## Project Overview - test
+## Project Overview
 
 This is a TUI (Terminal User Interface) application for tracking daily training activities, nutrition, and body measurements with the following features:
 
