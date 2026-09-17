@@ -80,7 +80,7 @@ impl App {
                 self.handle_edit_field(field, EditOrigin::Shortcut);
             }
             ClickAction::AddFood if matches!(self.state.current_screen, AppScreen::DailyView) => {
-                self.state.focused_section = FocusedSection::FoodItems;
+                self.focus_section(FocusedSection::FoodItems);
                 self.state.current_screen = AppScreen::AddFood;
             }
             ClickAction::SelectFood(index)
@@ -89,7 +89,7 @@ impl App {
                 let edit_selected = matches!(self.state.focused_section, FocusedSection::FoodItems)
                     && self.state.food_list_focused
                     && self.food_list_state.selected() == Some(index);
-                self.state.focused_section = FocusedSection::FoodItems;
+                self.focus_section(FocusedSection::FoodItems);
                 self.state.food_list_focused = true;
                 self.food_list_state.select(Some(index));
                 if edit_selected {
@@ -97,7 +97,7 @@ impl App {
                 }
             }
             ClickAction::AddSokay if matches!(self.state.current_screen, AppScreen::DailyView) => {
-                self.state.focused_section = FocusedSection::Sokay;
+                self.focus_section(FocusedSection::Sokay);
                 self.state.current_screen = AppScreen::AddSokay;
             }
             ClickAction::SelectSokay(index)
@@ -106,7 +106,7 @@ impl App {
                 let edit_selected = matches!(self.state.focused_section, FocusedSection::Sokay)
                     && self.state.sokay_list_focused
                     && self.sokay_list_state.selected() == Some(index);
-                self.state.focused_section = FocusedSection::Sokay;
+                self.focus_section(FocusedSection::Sokay);
                 self.state.sokay_list_focused = true;
                 self.sokay_list_state.select(Some(index));
                 if edit_selected {
@@ -147,6 +147,43 @@ impl App {
                 self.config_sync_enabled = !self.config_sync_enabled;
             }
             _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::test_support::test_app;
+    use crate::models::FoodEntry;
+    use tempfile::TempDir;
+
+    /// A click that moves section focus has to clear the scroll offset of the
+    /// section it leaves, exactly as the equivalent key does.
+    #[tokio::test]
+    async fn clicks_that_move_focus_clear_the_scroll_of_the_section_left() {
+        let dir = TempDir::new().unwrap();
+        let cases = [
+            (ClickAction::AddFood, FocusedSection::FoodItems),
+            (ClickAction::SelectFood(0), FocusedSection::FoodItems),
+            (ClickAction::AddSokay, FocusedSection::Sokay),
+            (ClickAction::SelectSokay(0), FocusedSection::Sokay),
+        ];
+
+        for (action, expected_focus) in cases {
+            let mut app = test_app(&dir).await;
+            let date = app.state.selected_date;
+            let log = app.state.get_or_create_daily_log(date);
+            log.add_food_entry(FoodEntry::new("Eggs".to_string()));
+            log.add_sokay_entry("donut".to_string());
+            app.state.current_screen = AppScreen::DailyView;
+            app.state.focused_section = FocusedSection::Notes;
+            app.state.notes_scroll = 3;
+
+            app.handle_click_action(action.clone());
+
+            assert_eq!(app.state.focused_section, expected_focus, "{action:?}");
+            assert_eq!(app.state.notes_scroll, 0, "{action:?}");
         }
     }
 }
