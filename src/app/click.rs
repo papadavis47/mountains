@@ -77,8 +77,7 @@ impl App {
                             | crate::models::field_accessor::FieldType::Elevation
                     ) =>
             {
-                self.state.focused_section = SectionNavigator::field_section(field);
-                self.handle_edit_field(field);
+                self.handle_edit_field(field, EditOrigin::Shortcut);
             }
             ClickAction::AddFood if matches!(self.state.current_screen, AppScreen::DailyView) => {
                 self.state.focused_section = FocusedSection::FoodItems;
@@ -118,20 +117,22 @@ impl App {
                 if matches!(self.state.current_screen, AppScreen::DailyView) =>
             {
                 if matches!(self.state.focused_section, FocusedSection::StrengthMobility) {
-                    self.handle_edit_strength_mobility();
+                    self.handle_edit_field(
+                        crate::models::field_accessor::FieldType::StrengthMobility,
+                        EditOrigin::Shortcut,
+                    );
                 } else {
-                    self.state.strength_mobility_scroll = 0;
-                    self.state.notes_scroll = 0;
-                    self.state.focused_section = FocusedSection::StrengthMobility;
+                    self.focus_section(FocusedSection::StrengthMobility);
                 }
             }
             ClickAction::Notes if matches!(self.state.current_screen, AppScreen::DailyView) => {
                 if matches!(self.state.focused_section, FocusedSection::Notes) {
-                    self.handle_edit_notes();
+                    self.handle_edit_field(
+                        crate::models::field_accessor::FieldType::Notes,
+                        EditOrigin::Shortcut,
+                    );
                 } else {
-                    self.state.strength_mobility_scroll = 0;
-                    self.state.notes_scroll = 0;
-                    self.state.focused_section = FocusedSection::Notes;
+                    self.focus_section(FocusedSection::Notes);
                 }
             }
             ClickAction::FocusConfigField(field)

@@ -5,16 +5,19 @@ impl App {
     pub(super) async fn handle_add_food_input(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Enter => {
-                if let Some(log) = ActionHandler::save_food_entry(
+                let saved = ActionHandler::save_food_entry(
                     &mut self.state,
                     self.input_handler.input_buffer.clone(),
-                ) {
-                    self.input_handler.clear();
-                    self.state.current_screen = AppScreen::DailyView;
+                );
+                self.input_handler.clear();
+                self.state.current_screen = AppScreen::DailyView;
+                if let Some(log) = saved {
+                    // Land on the entry just added: `e`/`d` act on it without
+                    // first pressing `j`. An empty save selects nothing.
+                    self.state.food_list_focused = true;
+                    self.food_list_state
+                        .select(Some(log.food_entries.len() - 1));
                     self.spawn_persist(log);
-                } else {
-                    self.input_handler.clear();
-                    self.state.current_screen = AppScreen::DailyView;
                 }
             }
             KeyCode::Esc => {
@@ -80,10 +83,13 @@ impl App {
                     self.input_handler.insert_newline();
                 } else {
                     let entered = !self.input_handler.input_buffer.trim().is_empty();
-                    // After entering data, move focus to the next field so entry
-                    // flows top-to-bottom without manual Shift+J. An empty save
-                    // stays put. Focus-only — the next field isn't auto-opened.
-                    let next_focus = if entered {
+                    // Reached by Enter after Shift+J/K, entering data moves focus
+                    // to the next field so a pass over the day flows top-to-bottom
+                    // without manual Shift+J. A field opened by its own shortcut is
+                    // a targeted edit, so focus stays on it; so does an empty save.
+                    // Focus-only — the next field isn't auto-opened.
+                    let advance = entered && self.state.edit_origin == EditOrigin::Navigation;
+                    let next_focus = if advance {
                         SectionNavigator::advance_field(field_type, self.state.simple_mode)
                     } else {
                         SectionNavigator::field_section(field_type)
@@ -128,9 +134,11 @@ impl App {
             self.input_handler.input_buffer.clone(),
         );
         self.input_handler.clear();
-        self.state.focused_section = next_focus;
+        // Unconditional, unlike `focus_section`: the text just changed, so an old
+        // offset into it could point past the new end.
         self.state.strength_mobility_scroll = 0;
         self.state.notes_scroll = 0;
+        self.state.focused_section = next_focus;
         self.state.current_screen = AppScreen::DailyView;
         self.spawn_persist(log);
     }
@@ -138,17 +146,17 @@ impl App {
     pub(super) async fn handle_add_sokay_input(&mut self, key: KeyCode) -> Result<()> {
         match key {
             KeyCode::Enter => {
-                if let Some(log) = ActionHandler::save_sokay_entry(
+                let saved = ActionHandler::save_sokay_entry(
                     &mut self.state,
                     self.input_handler.input_buffer.clone(),
-                ) {
-                    self.input_handler.clear();
-                    self.state.current_screen = AppScreen::DailyView;
-
+                );
+                self.input_handler.clear();
+                self.state.current_screen = AppScreen::DailyView;
+                if let Some(log) = saved {
+                    self.state.sokay_list_focused = true;
+                    self.sokay_list_state
+                        .select(Some(log.sokay_entries.len() - 1));
                     self.spawn_persist(log);
-                } else {
-                    self.input_handler.clear();
-                    self.state.current_screen = AppScreen::DailyView;
                 }
             }
             KeyCode::Esc => {
@@ -456,14 +464,24 @@ mod tests {
         }
     }
 
+    /// Entering a field by Enter is a top-to-bottom entry pass, so saving steps
+    /// to the next field. Contrast `a_shortcut_opened_field_keeps_focus_after_saving`.
     #[tokio::test]
     async fn enter_keeps_advancing_to_the_next_field() {
         let dir = TempDir::new().unwrap();
         let mut app = test_app(&dir).await;
-        app.state.current_screen = AppScreen::InputField(FieldType::Waist);
-        app.input_handler.set_input("34.25".to_string());
+        let date = app.state.selected_date;
+        app.state.get_or_create_daily_log(date);
+        app.state.current_screen = AppScreen::DailyView;
+        app.state.focused_section = FocusedSection::Measurements {
+            focused_field: MeasurementField::Waist,
+        };
 
-        app.handle_field_input(KeyCode::Enter, KeyModifiers::NONE, FieldType::Waist)
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.input_handler.set_input("34.25".to_string());
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
             .await
             .unwrap();
 
@@ -475,5 +493,202 @@ mod tests {
             }
         );
         assert!(matches!(app.state.current_screen, AppScreen::DailyView));
+    }
+
+    /// A field opened by its own shortcut is a targeted edit, so saving leaves
+    /// focus on that field rather than stepping to the next one.
+    #[tokio::test]
+    async fn a_shortcut_opened_field_keeps_focus_after_saving() {
+        let dir = TempDir::new().unwrap();
+        let cases = [
+            (
+                'w',
+                FieldType::Weight,
+                "175.5",
+                FocusedSection::Measurements {
+                    focused_field: MeasurementField::Weight,
+                },
+            ),
+            (
+                's',
+                FieldType::Waist,
+                "34.25",
+                FocusedSection::Measurements {
+                    focused_field: MeasurementField::Waist,
+                },
+            ),
+            (
+                'm',
+                FieldType::Miles,
+                "7.2",
+                FocusedSection::Running {
+                    focused_field: RunningField::Miles,
+                },
+            ),
+            (
+                'l',
+                FieldType::Elevation,
+                "1400",
+                FocusedSection::Running {
+                    focused_field: RunningField::Elevation,
+                },
+            ),
+            (
+                't',
+                FieldType::StrengthMobility,
+                "squats",
+                FocusedSection::StrengthMobility,
+            ),
+            ('n', FieldType::Notes, "felt strong", FocusedSection::Notes),
+        ];
+
+        for (key, field, input, expected_focus) in cases {
+            let mut app = test_app(&dir).await;
+            let date = app.state.selected_date;
+            app.state.get_or_create_daily_log(date);
+            app.state.current_screen = AppScreen::DailyView;
+            app.state.focused_section = FocusedSection::FoodItems;
+
+            app.handle_key_event_with_modifiers(KeyCode::Char(key), KeyModifiers::NONE)
+                .await
+                .unwrap();
+            app.input_handler.set_input(input.to_string());
+            app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+                .await
+                .unwrap();
+
+            assert_eq!(field.get_value(&app.state), input, "'{key}' value");
+            assert_eq!(app.state.focused_section, expected_focus, "'{key}' focus");
+            assert!(matches!(app.state.current_screen, AppScreen::DailyView));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_shortcut_opened_field_keeps_focus_after_escaping() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        let date = app.state.selected_date;
+        app.state.get_or_create_daily_log(date);
+        app.state.current_screen = AppScreen::DailyView;
+        app.state.focused_section = FocusedSection::Notes;
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('w'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.handle_key_event_with_modifiers(KeyCode::Esc, KeyModifiers::NONE)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            app.state.focused_section,
+            FocusedSection::Measurements {
+                focused_field: MeasurementField::Weight,
+            }
+        );
+        assert!(matches!(app.state.current_screen, AppScreen::DailyView));
+    }
+
+    #[tokio::test]
+    async fn saving_a_new_food_entry_selects_it_in_the_list() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        let date = app.state.selected_date;
+        app.state.get_or_create_daily_log(date);
+        app.state.current_screen = AppScreen::DailyView;
+
+        for name in ["Eggs", "Toast"] {
+            app.handle_key_event_with_modifiers(KeyCode::Char('f'), KeyModifiers::NONE)
+                .await
+                .unwrap();
+            app.input_handler.set_input(name.to_string());
+            app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(app.state.focused_section, FocusedSection::FoodItems);
+        assert!(app.state.food_list_focused);
+        assert_eq!(app.food_list_state.selected(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn saving_a_new_sokay_entry_selects_it_in_the_list() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        let date = app.state.selected_date;
+        app.state.get_or_create_daily_log(date);
+        app.state.current_screen = AppScreen::DailyView;
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('c'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.input_handler.set_input("donut".to_string());
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+
+        assert_eq!(app.state.focused_section, FocusedSection::Sokay);
+        assert!(app.state.sokay_list_focused);
+        assert_eq!(app.sokay_list_state.selected(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn an_empty_save_leaves_the_food_list_unselected() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        let date = app.state.selected_date;
+        app.state.get_or_create_daily_log(date);
+        app.state.current_screen = AppScreen::DailyView;
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('f'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+
+        assert_eq!(app.state.focused_section, FocusedSection::FoodItems);
+        assert!(!app.state.food_list_focused);
+        assert_eq!(app.food_list_state.selected(), None);
+    }
+
+    /// Simple mode keeps its own traversal (Miles → Elevation → Food → Notes →
+    /// Miles) for the Enter-driven pass; only the direct-shortcut route stays put.
+    #[tokio::test]
+    async fn simple_mode_advances_on_enter_but_stays_put_on_a_shortcut() {
+        let dir = TempDir::new().unwrap();
+
+        let mut app = test_app(&dir).await;
+        app.apply_launch_mode(crate::models::LaunchMode::Simple);
+        app.state.focused_section = FocusedSection::Notes;
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.input_handler.set_input("long climb".to_string());
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert_eq!(
+            app.state.focused_section,
+            FocusedSection::Running {
+                focused_field: RunningField::Miles,
+            },
+            "Enter from Notes wraps to Miles in simple mode"
+        );
+
+        let mut app = test_app(&dir).await;
+        app.apply_launch_mode(crate::models::LaunchMode::Simple);
+        app.handle_key_event_with_modifiers(KeyCode::Char('n'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.input_handler.set_input("long climb".to_string());
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert_eq!(
+            app.state.focused_section,
+            FocusedSection::Notes,
+            "'n' is a targeted edit, so focus stays on Notes"
+        );
     }
 }

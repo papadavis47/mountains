@@ -653,6 +653,7 @@ fn render_sokay_section(
             selected_date: ctx.selected_date,
             daily_logs: ctx.daily_logs.to_vec(),
             focused_section: FocusedSection::FoodItems,
+            edit_origin: crate::models::EditOrigin::Navigation,
             food_list_focused: false,
             sokay_list_focused: false,
             strength_mobility_scroll: 0,

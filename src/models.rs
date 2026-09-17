@@ -85,6 +85,16 @@ pub enum FocusedSection {
     Notes,
 }
 
+/// How the editor currently on screen was opened. A direct shortcut (or a
+/// click) targets one field, so saving leaves focus there; arriving by Enter
+/// after Shift+J/K is a top-to-bottom entry pass, which advances to the next
+/// field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EditOrigin {
+    Shortcut,
+    Navigation,
+}
+
 /// Target for delete confirmation dialogs
 #[derive(Debug, Clone, Copy)]
 pub enum DeleteTarget {
@@ -132,6 +142,7 @@ pub struct AppState {
     pub selected_date: NaiveDate,
     pub daily_logs: Vec<DailyLog>,
     pub focused_section: FocusedSection,
+    pub edit_origin: EditOrigin,
     pub food_list_focused: bool,
     pub sokay_list_focused: bool,
     pub strength_mobility_scroll: u16,
@@ -156,6 +167,7 @@ impl AppState {
             focused_section: FocusedSection::Measurements {
                 focused_field: MeasurementField::Weight,
             },
+            edit_origin: EditOrigin::Navigation,
             food_list_focused: false,
             sokay_list_focused: false,
             strength_mobility_scroll: 0,

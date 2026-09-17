@@ -178,7 +178,8 @@ For numeric fields, Tab is an alternate save action that preserves pair toggling
 - **Focus-only, not edit-ready:** the next field is highlighted but not opened for typing; press Enter (or a quick-access key) to edit it, or Shift+K to go back. This applies uniformly to every single-value field, including the wrap from Notes back to Weight.
 - **Empty Enter save stays put:** if the value is left blank, focus remains on the field (no advance); numeric Tab still toggles after saving an empty value.
 - **Food/Sokay are exempt as sources:** their Add dialogs keep letting you enter item after item; you move on manually when done. Advancing *into* Food/Sokay (e.g. from Elevation) just focuses the section — no dialog auto-opens.
-- Implemented via `SectionNavigator::advance_field` / `field_section` (`events/handlers.rs`), applied in the save branch of `handle_field_input` (`app/input.rs`).
+- **Only when reached by Enter:** advancing is for a top-to-bottom pass over the day. A field opened by its quick-access key (or a click) is a targeted edit, so saving leaves focus on that field — see "Quick access moves focus" below.
+- Implemented via `SectionNavigator::advance_field` / `field_section` (`events/handlers.rs`), applied in the save branch of `handle_field_input` (`app/input.rs`). `AppState::edit_origin` records which of the two routes opened the editor.
 
 #### Shortcuts Overlay
 
@@ -202,6 +203,15 @@ These shortcuts allow quick data entry without navigating sections. Press **Spac
 - `S` - Go to Startup Screen
 - `Esc` - Back to home screen
 
+##### Quick access moves focus
+
+A quick-access key moves section focus onto what it opens, so the daily view behind the editor marks where the typing lands and you stay in that part of the day afterward:
+
+- **On open:** the target section takes focus (bright border, `►` on the field). `Esc` therefore leaves you on that section rather than back where you started.
+- **On save:** focus stays on the field you edited — no auto-advance (that is reserved for the Enter-driven pass, above).
+- **`f`/`c`:** focus the Food/Sokay section without selecting a row; the list stays unselected until you save an item or press `j`/`k`. Saving a new item selects it, so `e`/`d` act on it immediately. An empty save selects nothing.
+- Clicking a section or field behaves the same way as its key.
+
 ### Add/Edit Food Screens
 
 - **Text input** with full cursor support
@@ -219,7 +229,7 @@ Weight, Waist, Miles, and Elevation are edited **in place** within their Measure
 - `←/→` - Move cursor within text
 - `Home/End` - Jump to beginning/end
 - `Backspace/Delete` - Remove characters
-- `Enter` - Save measurement and focus the next field in entry order
+- `Enter` - Save measurement; focus advances to the next field in entry order when the editor was opened with Enter, and stays put when it was opened with a quick-access key or a click
 - `Tab` - Save measurement and toggle to the paired numeric field (Weight ↔ Waist or Miles ↔ Elevation)
 - `Esc` - Cancel and return (restores original value)
 
@@ -458,9 +468,10 @@ committed pre-commit hook enforces this on every commit.
 ### Key Data Structures
 
 - **DailyLog** - Main data model with food_entries, measurements, sokay_entries, strength_mobility, notes
-- **AppState** - Application state with daily_logs cache, current screen/selection, focused_section, simple_mode, and date_input_error
+- **AppState** - Application state with daily_logs cache, current screen/selection, focused_section, edit_origin, simple_mode, and date_input_error
 - **LaunchMode** - CLI-chosen start screen (Startup/Today/Simple), applied by `AppState::apply_launch_mode`
 - **FocusedSection** - Enum tracking which section has focus (Measurements, Running, FoodItems, Sokay, StrengthMobility, Notes)
+- **EditOrigin** - Enum recording how the open editor was reached (Shortcut, Navigation); the save branch reads it to decide stay-put vs. auto-advance
 - **MeasurementField** - Enum for tracking focus within Measurements section (Weight, Waist)
 - **RunningField** - Enum for tracking focus within Running section (Miles, Elevation)
 - **SectionNavigator** - Pure function-based navigation logic for section and field traversal

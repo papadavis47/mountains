@@ -12,7 +12,8 @@ use crate::db_manager::{ConnectionState, DbManager};
 use crate::events::handlers::{ActionHandler, InputHandler, NavigationHandler, SectionNavigator};
 use crate::file_manager::FileManager;
 use crate::models::{
-    AppScreen, AppState, ConfigSyncField, DailyLog, FocusedSection, MeasurementField, RunningField,
+    AppScreen, AppState, ConfigSyncField, DailyLog, EditOrigin, FocusedSection, MeasurementField,
+    RunningField,
 };
 use crate::ui::screens;
 use crate::ui::{ClickAction, ClickTarget, hit_test, left_click_position};

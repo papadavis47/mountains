@@ -1,4 +1,5 @@
 use super::*;
+use crate::models::field_accessor::FieldType;
 
 impl App {
     pub(super) async fn handle_navigation_input(
@@ -11,25 +12,19 @@ impl App {
             match key {
                 KeyCode::Char('J') => {
                     if matches!(self.state.current_screen, AppScreen::DailyView) {
-                        // Reset scroll when leaving expanded sections
-                        self.state.strength_mobility_scroll = 0;
-                        self.state.notes_scroll = 0;
-                        self.state.focused_section = SectionNavigator::move_focus_down(
+                        self.focus_section(SectionNavigator::move_focus_down(
                             &self.state.focused_section,
                             self.state.simple_mode,
-                        );
+                        ));
                     }
                     return Ok(());
                 }
                 KeyCode::Char('K') => {
                     if matches!(self.state.current_screen, AppScreen::DailyView) {
-                        // Reset scroll when leaving expanded sections
-                        self.state.strength_mobility_scroll = 0;
-                        self.state.notes_scroll = 0;
-                        self.state.focused_section = SectionNavigator::move_focus_up(
+                        self.focus_section(SectionNavigator::move_focus_up(
                             &self.state.focused_section,
                             self.state.simple_mode,
-                        );
+                        ));
                     }
                     return Ok(());
                 }
@@ -127,6 +122,7 @@ impl App {
             }
             KeyCode::Char('f') => {
                 if matches!(self.state.current_screen, AppScreen::DailyView) {
+                    self.focus_section(FocusedSection::FoodItems);
                     self.state.current_screen = AppScreen::AddFood;
                 }
             }
@@ -143,7 +139,7 @@ impl App {
                 if matches!(self.state.current_screen, AppScreen::DailyView)
                     && self.daily_view_key_enabled('w')
                 {
-                    self.handle_edit_weight();
+                    self.handle_edit_field(FieldType::Weight, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('s') => {
@@ -152,14 +148,14 @@ impl App {
                 } else if matches!(self.state.current_screen, AppScreen::DailyView)
                     && self.daily_view_key_enabled('s')
                 {
-                    self.handle_edit_waist();
+                    self.handle_edit_field(FieldType::Waist, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('t') => {
                 if matches!(self.state.current_screen, AppScreen::DailyView)
                     && self.daily_view_key_enabled('t')
                 {
-                    self.handle_edit_strength_mobility();
+                    self.handle_edit_field(FieldType::StrengthMobility, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('n') => {
@@ -168,24 +164,25 @@ impl App {
                     self.state.get_or_create_daily_log(self.state.selected_date);
                     self.state.current_screen = AppScreen::DailyView;
                 } else if matches!(self.state.current_screen, AppScreen::DailyView) {
-                    self.handle_edit_notes();
+                    self.handle_edit_field(FieldType::Notes, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('m') => {
                 if matches!(self.state.current_screen, AppScreen::DailyView) {
-                    self.handle_edit_miles();
+                    self.handle_edit_field(FieldType::Miles, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('l') => {
                 if matches!(self.state.current_screen, AppScreen::Startup) {
                     self.state.current_screen = AppScreen::Home;
                 } else if matches!(self.state.current_screen, AppScreen::DailyView) {
-                    self.handle_edit_elevation();
+                    self.handle_edit_field(FieldType::Elevation, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('c') => {
                 if matches!(self.state.current_screen, AppScreen::DailyView) {
                     if self.daily_view_key_enabled('c') {
+                        self.focus_section(FocusedSection::Sokay);
                         self.state.current_screen = AppScreen::AddSokay;
                     }
                 } else if matches!(self.state.current_screen, AppScreen::Startup) {
@@ -260,12 +257,20 @@ impl App {
     pub(super) async fn handle_section_enter(&mut self) -> Result<()> {
         match &self.state.focused_section {
             FocusedSection::Measurements { focused_field } => match focused_field {
-                MeasurementField::Weight => self.handle_edit_weight(),
-                MeasurementField::Waist => self.handle_edit_waist(),
+                MeasurementField::Weight => {
+                    self.handle_edit_field(FieldType::Weight, EditOrigin::Navigation)
+                }
+                MeasurementField::Waist => {
+                    self.handle_edit_field(FieldType::Waist, EditOrigin::Navigation)
+                }
             },
             FocusedSection::Running { focused_field } => match focused_field {
-                RunningField::Miles => self.handle_edit_miles(),
-                RunningField::Elevation => self.handle_edit_elevation(),
+                RunningField::Miles => {
+                    self.handle_edit_field(FieldType::Miles, EditOrigin::Navigation)
+                }
+                RunningField::Elevation => {
+                    self.handle_edit_field(FieldType::Elevation, EditOrigin::Navigation)
+                }
             },
             FocusedSection::FoodItems => {
                 self.state.current_screen = AppScreen::AddFood;
@@ -274,10 +279,10 @@ impl App {
                 self.state.current_screen = AppScreen::AddSokay;
             }
             FocusedSection::StrengthMobility => {
-                self.handle_edit_strength_mobility();
+                self.handle_edit_field(FieldType::StrengthMobility, EditOrigin::Navigation);
             }
             FocusedSection::Notes => {
-                self.handle_edit_notes();
+                self.handle_edit_field(FieldType::Notes, EditOrigin::Navigation);
             }
         }
         Ok(())
@@ -447,40 +452,26 @@ impl App {
         }
     }
 
-    pub(super) fn handle_edit_weight(&mut self) {
-        use crate::models::field_accessor::FieldType;
-        self.handle_edit_field(FieldType::Weight);
+    /// Moves section focus. Scroll offsets belong to the section being left, so
+    /// they clear only on a real move — re-focusing the current section (a quick
+    /// -access key aimed at where you already are) keeps your place in it.
+    pub(super) fn focus_section(&mut self, section: FocusedSection) {
+        if self.state.focused_section != section {
+            self.state.strength_mobility_scroll = 0;
+            self.state.notes_scroll = 0;
+        }
+        self.state.focused_section = section;
     }
 
-    pub(super) fn handle_edit_field(&mut self, field: crate::models::field_accessor::FieldType) {
+    /// Opens `field`'s editor and moves focus onto it, so the daily view behind
+    /// the editor marks where the typing lands. `origin` records how we got
+    /// here; the save reads it to decide whether to stay or advance.
+    pub(super) fn handle_edit_field(&mut self, field: FieldType, origin: EditOrigin) {
         let current_value = ActionHandler::start_edit_field(&self.state, field);
         self.input_handler.set_input(current_value);
+        self.focus_section(SectionNavigator::field_section(field));
+        self.state.edit_origin = origin;
         self.state.current_screen = AppScreen::InputField(field);
-    }
-
-    pub(super) fn handle_edit_waist(&mut self) {
-        use crate::models::field_accessor::FieldType;
-        self.handle_edit_field(FieldType::Waist);
-    }
-
-    pub(super) fn handle_edit_strength_mobility(&mut self) {
-        use crate::models::field_accessor::FieldType;
-        self.handle_edit_field(FieldType::StrengthMobility);
-    }
-
-    pub(super) fn handle_edit_notes(&mut self) {
-        use crate::models::field_accessor::FieldType;
-        self.handle_edit_field(FieldType::Notes);
-    }
-
-    pub(super) fn handle_edit_miles(&mut self) {
-        use crate::models::field_accessor::FieldType;
-        self.handle_edit_field(FieldType::Miles);
-    }
-
-    pub(super) fn handle_edit_elevation(&mut self) {
-        use crate::models::field_accessor::FieldType;
-        self.handle_edit_field(FieldType::Elevation);
     }
 
     pub(super) fn handle_edit_sokay(&mut self) {
@@ -504,5 +495,138 @@ impl App {
             self.state.selected_date = self.state.daily_logs[selected_index].date;
             self.state.current_screen = AppScreen::ConfirmDelete(DeleteTarget::Day);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::test_support::test_app;
+    use crate::models::field_accessor::FieldType;
+    use crossterm::event::KeyModifiers;
+    use tempfile::TempDir;
+
+    async fn daily_view_app(dir: &TempDir) -> App {
+        let mut app = test_app(dir).await;
+        let date = app.state.selected_date;
+        app.state.get_or_create_daily_log(date);
+        app.state.current_screen = AppScreen::DailyView;
+        app.state.focused_section = FocusedSection::FoodItems;
+        app
+    }
+
+    #[tokio::test]
+    async fn add_food_shortcut_focuses_food_without_selecting_a_row() {
+        let dir = TempDir::new().unwrap();
+        let mut app = daily_view_app(&dir).await;
+        app.state.focused_section = FocusedSection::Notes;
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('f'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+
+        assert!(matches!(app.state.current_screen, AppScreen::AddFood));
+        assert_eq!(app.state.focused_section, FocusedSection::FoodItems);
+        assert!(!app.state.food_list_focused);
+        assert_eq!(app.food_list_state.selected(), None);
+    }
+
+    #[tokio::test]
+    async fn add_sokay_shortcut_focuses_sokay_without_selecting_a_row() {
+        let dir = TempDir::new().unwrap();
+        let mut app = daily_view_app(&dir).await;
+        app.state.focused_section = FocusedSection::Notes;
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('c'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+
+        assert!(matches!(app.state.current_screen, AppScreen::AddSokay));
+        assert_eq!(app.state.focused_section, FocusedSection::Sokay);
+        assert!(!app.state.sokay_list_focused);
+        assert_eq!(app.sokay_list_state.selected(), None);
+    }
+
+    #[tokio::test]
+    async fn field_shortcuts_focus_the_field_they_open() {
+        let dir = TempDir::new().unwrap();
+        let cases = [
+            (
+                'w',
+                FieldType::Weight,
+                FocusedSection::Measurements {
+                    focused_field: MeasurementField::Weight,
+                },
+            ),
+            (
+                's',
+                FieldType::Waist,
+                FocusedSection::Measurements {
+                    focused_field: MeasurementField::Waist,
+                },
+            ),
+            (
+                'm',
+                FieldType::Miles,
+                FocusedSection::Running {
+                    focused_field: RunningField::Miles,
+                },
+            ),
+            (
+                'l',
+                FieldType::Elevation,
+                FocusedSection::Running {
+                    focused_field: RunningField::Elevation,
+                },
+            ),
+            (
+                't',
+                FieldType::StrengthMobility,
+                FocusedSection::StrengthMobility,
+            ),
+            ('n', FieldType::Notes, FocusedSection::Notes),
+        ];
+
+        for (key, field, expected_focus) in cases {
+            let mut app = daily_view_app(&dir).await;
+
+            app.handle_key_event_with_modifiers(KeyCode::Char(key), KeyModifiers::NONE)
+                .await
+                .unwrap();
+
+            assert!(
+                matches!(app.state.current_screen, AppScreen::InputField(f) if f == field),
+                "'{key}' should open {field:?}"
+            );
+            assert_eq!(app.state.focused_section, expected_focus, "'{key}' focus");
+        }
+    }
+
+    #[tokio::test]
+    async fn opening_the_editor_for_the_focused_section_keeps_its_scroll() {
+        let dir = TempDir::new().unwrap();
+        let mut app = daily_view_app(&dir).await;
+        app.state.focused_section = FocusedSection::Notes;
+        app.state.notes_scroll = 3;
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('n'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+
+        assert_eq!(app.state.notes_scroll, 3);
+    }
+
+    #[tokio::test]
+    async fn focusing_a_different_section_resets_scroll() {
+        let dir = TempDir::new().unwrap();
+        let mut app = daily_view_app(&dir).await;
+        app.state.focused_section = FocusedSection::Notes;
+        app.state.notes_scroll = 3;
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('w'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+
+        assert_eq!(app.state.notes_scroll, 0);
     }
 }
