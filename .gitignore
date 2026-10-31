@@ -22,8 +22,5 @@
 .DS_Store
 Thumbs.db
 
-# For notes
-chalk_board.md
-
 # Learning notes (local only)
-learning/*
+learning/
