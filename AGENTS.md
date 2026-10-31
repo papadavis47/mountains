@@ -2,7 +2,7 @@
 
 A terminal-based training and nutrition tracking application built with Rust and ratatui.
 
-Current release: **v0.9.3**.
+Current release: **v0.10.0**.
 
 ## Project Overview
 
@@ -36,7 +36,7 @@ This is a TUI (Terminal User Interface) application for tracking daily training 
 
 ### Startup Screen
 
-The startup screen appears when the application launches without flags (`-t`/`-s` bypass it). It displays:
+The startup screen appears when the application launches without flags (`-t`/`-s`/`-n`/`-f` bypass it). It displays:
 
 - **ASCII art logo** - "MOUNTAINS" in large text art (centered)
 - **Subtitle** - "For Inspiration and Mindfulness"
@@ -289,6 +289,8 @@ Parsed in `main.rs` (`handle_cli_args`) before the TUI starts, so they print to 
 
 - `-t` / `--today` - Launch directly into today's DailyView (creating the log if needed), bypassing the Startup screen
 - `-s` / `--simple` - Launch directly into today's log in **simple quick-entry mode** (see below); implies `-t`
+- `-n` / `--notes` - Launch directly into today's log in **notes mode** (Notes only, see below); implies `-t`
+- `-f` / `--food` - Launch directly into today's log in **food mode** (Food and Sokay only, see below); implies `-t`
 - `-V` / `--version` - Print `mountains <version>` (version sourced from `CARGO_PKG_VERSION`, auto-synced to Cargo.toml) and exit 0
 - `-h` / `--help` - Print usage/help (the `HELP_TEXT` const) and exit 0
 - Unrecognized argument - Print error + help to stderr and exit 2
@@ -307,6 +309,13 @@ A compact DailyView variant for fast daily entry:
 - Space overlay and footer help tiers list only the available shortcuts
 - Mouse targets derive from what's drawn, so hidden sections aren't clickable
 - `q` quits with the normal sync flow; `Esc` goes to Home **and ends simple mode** — the rest of the session behaves like the full app (re-opening a day shows the full view)
+
+### Notes Mode (`-n`) and Food Mode (`-f`)
+
+Two more compact DailyView variants sharing simple mode's centered window, exit semantics (`Esc` → Home ends the mode, `q` quits with sync), live-only Space overlay/footer, and drawn-only mouse targets. The active layout is `AppState.view_mode` (`ViewMode::{Full, Simple, Notes, Food}`).
+
+- **Notes mode** - title "Notes - <date>"; only Notes, sized to fill the window and scrolled in place with `j`/`k` (clamped by `notes_mode_max_scroll`, which mirrors the window geometry). Opens with Notes focused, no editor open; `n`/Enter edits; a save keeps focus on Notes. All other section keys (`w`, `s`, `m`, `l`, `f`, `c`, `t`, `S`) are disabled.
+- **Food mode** - title "Food - <date>"; only Food and Sokay lists. Opens focused on Food; `Shift+J/K` toggles Food ↔ Sokay; `f`, `c`, `j`/`k`, `e`, `d` work as in full mode. `w`, `s`, `m`, `l`, `t`, `n`, `S` are disabled.
 
 ## File Structure
 
@@ -415,14 +424,22 @@ committed pre-commit hook enforces this on every commit.
 
 ## Recent Improvements
 
-### Latest Session (Snappy Input After Saving)
+### Latest Session (Notes and Food Launch Modes)
+
+- ✅ **`-n`/`--notes` flag** - Centered window with only Notes, filling the window and scrolling in place
+- ✅ **`-f`/`--food` flag** - Centered window with only Food and Sokay
+- ✅ **`ViewMode` enum** - `AppState.simple_mode: bool` replaced by `view_mode` (`Full`/`Simple`/`Notes`/`Food`); `SectionNavigator` traversal, auto-advance, and key gating take a `ViewMode`
+- ✅ **Shared compact frame** - `compact_frame_block`/`render_compact_frame` reused by all three compact views
+- ✅ **Test coverage** - Parser, launch modes, per-mode traversal/gating, renderer hiding/centering, notes scroll geometry, overlay content, app-level key handling
+
+### Previous Session (Snappy Input After Saving)
 
 - ✅ **No stall after saving** - Saving a Food/Sokay entry no longer freezes `j`/`k` for the duration of the Turso sync; the network call runs with the `DbManager` write lock released
 - ✅ **Sync status off the hot path** - `App` holds the `connection_state` Arc directly, so the event loop's per-frame status refresh never takes the `DbManager` lock
 - ✅ **Dead code removed** - private `DbManager::sync` and `get_connection_state` dropped
 - ✅ **Regression test** - a held write lock must not delay `update_sync_status` (fails by deadlock before the fix)
 
-### Previous Session (Text-Hugging List Highlight)
+### Earlier Session (Text-Hugging List Highlight)
 
 - ✅ **Selection hugs the text** - Home, Food, and Sokay rows highlight only the row text plus one trailing space instead of the full section width
 - ✅ **Shared helper** - `selectable_list_item` in `ui/components.rs` replaces the three `highlight_style` call sites
@@ -468,8 +485,9 @@ committed pre-commit hook enforces this on every commit.
 ### Key Data Structures
 
 - **DailyLog** - Main data model with food_entries, measurements, sokay_entries, strength_mobility, notes
-- **AppState** - Application state with daily_logs cache, current screen/selection, focused_section, edit_origin, simple_mode, and date_input_error
-- **LaunchMode** - CLI-chosen start screen (Startup/Today/Simple), applied by `AppState::apply_launch_mode`
+- **AppState** - Application state with daily_logs cache, current screen/selection, focused_section, edit_origin, view_mode, and date_input_error
+- **LaunchMode** - CLI-chosen start screen (Startup/Today/Simple/Notes/Food), applied by `AppState::apply_launch_mode`
+- **ViewMode** - Active DailyView layout (Full/Simple/Notes/Food); reset to Full when leaving DailyView for Home
 - **FocusedSection** - Enum tracking which section has focus (Measurements, Running, FoodItems, Sokay, StrengthMobility, Notes)
 - **EditOrigin** - Enum recording how the open editor was reached (Shortcut, Navigation); the save branch reads it to decide stay-put vs. auto-advance
 - **MeasurementField** - Enum for tracking focus within Measurements section (Weight, Waist)

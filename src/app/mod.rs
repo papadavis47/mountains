@@ -13,7 +13,7 @@ use crate::events::handlers::{ActionHandler, InputHandler, NavigationHandler, Se
 use crate::file_manager::FileManager;
 use crate::models::{
     AppScreen, AppState, ConfigSyncField, DailyLog, EditOrigin, FocusedSection, MeasurementField,
-    RunningField,
+    RunningField, ViewMode,
 };
 use crate::ui::screens;
 use crate::ui::{ClickAction, ClickTarget, hit_test, left_click_position};

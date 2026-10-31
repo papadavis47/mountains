@@ -64,6 +64,8 @@ const HELP_TEXT: &str = concat!(
     "    -t, --today      Open today's log directly, skipping the startup screen\n",
     "    -s, --simple     Open today's log in a compact quick-entry view\n",
     "                     (miles, elevation, food, notes only)\n",
+    "    -n, --notes      Open today's notes in a compact view\n",
+    "    -f, --food       Open today's food and sokay in a compact view\n",
     "    -h, --help       Print this help message\n",
     "    -V, --version    Print version information\n",
     "\n",
@@ -89,6 +91,8 @@ fn parse_cli_arg(arg: Option<&str>) -> CliAction {
         None => CliAction::Launch(models::LaunchMode::Startup),
         Some("-t") | Some("--today") => CliAction::Launch(models::LaunchMode::Today),
         Some("-s") | Some("--simple") => CliAction::Launch(models::LaunchMode::Simple),
+        Some("-n") | Some("--notes") => CliAction::Launch(models::LaunchMode::Notes),
+        Some("-f") | Some("--food") => CliAction::Launch(models::LaunchMode::Food),
         Some("-V") | Some("--version") => CliAction::PrintVersion,
         Some("-h") | Some("--help") => CliAction::PrintHelp,
         Some(other) => CliAction::Unrecognized(other.to_string()),
@@ -170,6 +174,30 @@ mod tests {
         assert_eq!(
             parse_cli_arg(Some("--simple")),
             CliAction::Launch(LaunchMode::Simple)
+        );
+    }
+
+    #[test]
+    fn notes_flags_launch_notes_mode() {
+        assert_eq!(
+            parse_cli_arg(Some("-n")),
+            CliAction::Launch(LaunchMode::Notes)
+        );
+        assert_eq!(
+            parse_cli_arg(Some("--notes")),
+            CliAction::Launch(LaunchMode::Notes)
+        );
+    }
+
+    #[test]
+    fn food_flags_launch_food_mode() {
+        assert_eq!(
+            parse_cli_arg(Some("-f")),
+            CliAction::Launch(LaunchMode::Food)
+        );
+        assert_eq!(
+            parse_cli_arg(Some("--food")),
+            CliAction::Launch(LaunchMode::Food)
         );
     }
 

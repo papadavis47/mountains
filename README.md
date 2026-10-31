@@ -32,9 +32,7 @@ git clone git@github.com:papadavis47/mountains.git
 
 cd mountains
 
-cargo install --path .
-
-# add --force if installing over an older version
+cargo install --path . --locked
 
 # binary builds to ~/.cargo/bin
 
@@ -69,6 +67,19 @@ mountains
 
 ```
 
-Run `mountains --help` in terminal for more info
+## Flags
+
+| Flag | Description |
+| --- | --- |
+| `-t`, `--today` | Open today's log directly, skipping the startup screen |
+| `-s`, `--simple` | Open today's log in a compact quick-entry view (miles, elevation, food, notes only) |
+| `-n`, `--notes` | Open today's notes in a compact view |
+| `-f`, `--food` | Open today's food and sokay in a compact view |
+| `-h`, `--help` | Print help |
+| `-V`, `--version` | Print version |
+
+Flags don't combine; only the first one is used. In the compact views, `Esc` goes to the log list and the rest of the session uses the full app.
+
+With `cargo run`, pass flags after `--`, e.g. `cargo run -- -n`.
 
 ### Made with [ratatui](https://ratatui.rs/) :)

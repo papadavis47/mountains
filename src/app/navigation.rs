@@ -14,7 +14,7 @@ impl App {
                     if matches!(self.state.current_screen, AppScreen::DailyView) {
                         self.focus_section(SectionNavigator::move_focus_down(
                             &self.state.focused_section,
-                            self.state.simple_mode,
+                            self.state.view_mode,
                         ));
                     }
                     return Ok(());
@@ -23,7 +23,7 @@ impl App {
                     if matches!(self.state.current_screen, AppScreen::DailyView) {
                         self.focus_section(SectionNavigator::move_focus_up(
                             &self.state.focused_section,
-                            self.state.simple_mode,
+                            self.state.view_mode,
                         ));
                     }
                     return Ok(());
@@ -121,7 +121,9 @@ impl App {
                 }
             }
             KeyCode::Char('f') => {
-                if matches!(self.state.current_screen, AppScreen::DailyView) {
+                if matches!(self.state.current_screen, AppScreen::DailyView)
+                    && self.daily_view_key_enabled('f')
+                {
                     self.focus_section(FocusedSection::FoodItems);
                     self.state.current_screen = AppScreen::AddFood;
                 }
@@ -163,19 +165,25 @@ impl App {
                     self.state.selected_date = chrono::Local::now().date_naive();
                     self.state.get_or_create_daily_log(self.state.selected_date);
                     self.state.current_screen = AppScreen::DailyView;
-                } else if matches!(self.state.current_screen, AppScreen::DailyView) {
+                } else if matches!(self.state.current_screen, AppScreen::DailyView)
+                    && self.daily_view_key_enabled('n')
+                {
                     self.handle_edit_field(FieldType::Notes, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('m') => {
-                if matches!(self.state.current_screen, AppScreen::DailyView) {
+                if matches!(self.state.current_screen, AppScreen::DailyView)
+                    && self.daily_view_key_enabled('m')
+                {
                     self.handle_edit_field(FieldType::Miles, EditOrigin::Shortcut);
                 }
             }
             KeyCode::Char('l') => {
                 if matches!(self.state.current_screen, AppScreen::Startup) {
                     self.state.current_screen = AppScreen::Home;
-                } else if matches!(self.state.current_screen, AppScreen::DailyView) {
+                } else if matches!(self.state.current_screen, AppScreen::DailyView)
+                    && self.daily_view_key_enabled('l')
+                {
                     self.handle_edit_field(FieldType::Elevation, EditOrigin::Shortcut);
                 }
             }
@@ -398,6 +406,13 @@ impl App {
             .get_daily_log(self.state.selected_date)
             .and_then(|l| l.notes.clone())
             .unwrap_or_default();
+        if self.state.view_mode == ViewMode::Notes {
+            return screens::notes_mode_max_scroll(
+                &text,
+                self.state.frame_width,
+                self.state.frame_height,
+            );
+        }
         screens::max_scroll_offset(&text, self.state.frame_width, self.state.frame_height)
     }
 
@@ -434,9 +449,9 @@ impl App {
     }
 
     /// DailyView keys pass through `SectionNavigator::daily_view_key_enabled`
-    /// so simple mode can disable the ones that reach hidden sections.
+    /// so compact view modes can disable the ones that reach hidden sections.
     fn daily_view_key_enabled(&self, key: char) -> bool {
-        SectionNavigator::daily_view_key_enabled(key, self.state.simple_mode)
+        SectionNavigator::daily_view_key_enabled(key, self.state.view_mode)
     }
 
     pub(super) fn handle_edit_food(&mut self) {

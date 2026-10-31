@@ -1,7 +1,7 @@
 use chrono::{Datelike, NaiveDate};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::miles_stats::{calculate_monthly_miles, calculate_yearly_miles};
 use crate::models::field_accessor::FieldType;
-use crate::models::{AppState, DailyLog, FocusedSection, MeasurementField, RunningField};
+use crate::models::{AppState, DailyLog, FocusedSection, MeasurementField, RunningField, ViewMode};
 use crate::ui::components::{render_help, render_title, selectable_list_item};
 use crate::ui::{ClickAction, ClickTarget};
 
@@ -44,9 +44,27 @@ pub fn render_daily_view_screen(
 ) {
     let mut click_targets = click_targets;
 
-    if state.simple_mode {
-        render_simple_daily_view(f, state, food_list_state, sync_status, edit, click_targets);
-        return;
+    match state.view_mode {
+        ViewMode::Full => {}
+        ViewMode::Simple => {
+            render_simple_daily_view(f, state, food_list_state, sync_status, edit, click_targets);
+            return;
+        }
+        ViewMode::Notes => {
+            render_notes_daily_view(f, state, sync_status, click_targets);
+            return;
+        }
+        ViewMode::Food => {
+            render_food_daily_view(
+                f,
+                state,
+                food_list_state,
+                sokay_list_state,
+                sync_status,
+                click_targets,
+            );
+            return;
+        }
     }
 
     let chunks = Layout::default()
@@ -119,7 +137,7 @@ pub fn render_daily_view_screen(
 
     render_strength_mobility_section(f, chunks[5], ctx, click_targets.as_deref_mut());
 
-    render_notes_section(f, chunks[6], ctx, click_targets.as_deref_mut());
+    render_notes_section(f, chunks[6], ctx, 0, click_targets.as_deref_mut());
 
     let help_tiers: &[&str] = if edit.is_some() {
         &[
@@ -163,6 +181,151 @@ pub fn render_daily_view_screen(
     }
 }
 
+/// Border block of the centered window shared by the compact view modes
+/// (`-s`, `-n`, `-f`).
+fn compact_frame_block() -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Green))
+        .padding(ratatui::widgets::Padding::new(3, 3, 1, 1))
+}
+
+/// Content area inside the compact window for a frame of the given size.
+fn compact_inner(area: Rect) -> Rect {
+    compact_frame_block().inner(crate::ui::components::centered_rect(area, 70, 85))
+}
+
+/// Draws the compact window frame and returns its content area.
+fn render_compact_frame(f: &mut Frame) -> Rect {
+    let window = crate::ui::components::centered_rect(f.area(), 70, 85);
+    f.render_widget(Clear, window);
+    f.render_widget(compact_frame_block(), window);
+    compact_inner(f.area())
+}
+
+/// Notes mode (`-n`) layout: title, Notes filling the middle, help footer.
+fn notes_mode_chunks(inner: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // Title
+            Constraint::Min(4),    // Notes section (fills the window)
+            Constraint::Length(3), // Help
+        ])
+        .split(inner)
+}
+
+/// Maximum Notes scroll offset in notes mode (`-n`), where Notes fills the
+/// compact window instead of expanding over the full-screen layout (see
+/// `max_scroll_offset`). Returns 0 when the text fits.
+pub fn notes_mode_max_scroll(text: &str, frame_width: u16, frame_height: u16) -> u16 {
+    let notes_area =
+        notes_mode_chunks(compact_inner(Rect::new(0, 0, frame_width, frame_height)))[1];
+    // Border + 1 cell of horizontal padding on each side.
+    let width = notes_area.width.saturating_sub(4) as usize;
+    let visible_text_lines = notes_area.height.saturating_sub(2);
+    let content_height = calculate_text_height(text, width) as u16;
+    if content_height <= visible_text_lines {
+        return 0;
+    }
+    // Same 1-line word-wrap buffer as `max_scroll_offset`.
+    content_height - visible_text_lines + 1
+}
+
+/// Renders the `-n` notes variant of the daily view: a centered window holding
+/// only the Notes section, sized to fill the window and scrolled in place.
+fn render_notes_daily_view(
+    f: &mut Frame,
+    state: &AppState,
+    sync_status: &str,
+    click_targets: Option<&mut Vec<ClickTarget>>,
+) {
+    let chunks = notes_mode_chunks(render_compact_frame(f));
+
+    let title = format!(
+        "Notes - {} {}",
+        state.selected_date.format("%B %d, %Y"),
+        sync_status
+    );
+    render_title(f, chunks[0], &title);
+
+    let ctx = SectionCtx {
+        selected_date: state.selected_date,
+        daily_logs: &state.daily_logs,
+        focused_section: &state.focused_section,
+    };
+    render_notes_section(f, chunks[1], ctx, state.notes_scroll, click_targets);
+
+    let help_tiers: &[&str] = &[
+        " Enter/n: Edit Notes | j/k: Scroll | Space: Shortcuts | Esc: Back",
+        " Enter: Edit | j/k: Scroll | Space: More | Esc: Back",
+        " Space: Shortcuts | Esc: Back",
+    ];
+    render_help(f, chunks[2], help_tiers, true, false);
+}
+
+/// Renders the `-f` food variant of the daily view: a centered window holding
+/// only the Food and Sokay lists.
+fn render_food_daily_view(
+    f: &mut Frame,
+    state: &AppState,
+    food_list_state: &mut ListState,
+    sokay_list_state: &mut ListState,
+    sync_status: &str,
+    mut click_targets: Option<&mut Vec<ClickTarget>>,
+) {
+    let inner = render_compact_frame(f);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // Title
+            Constraint::Min(4),    // Food list (scrollable)
+            Constraint::Min(4),    // Sokay list (scrollable, same size as food)
+            Constraint::Length(3), // Help
+        ])
+        .split(inner);
+
+    let title = format!(
+        "Food - {} {}",
+        state.selected_date.format("%B %d, %Y"),
+        sync_status
+    );
+    render_title(f, chunks[0], &title);
+
+    let ctx = SectionCtx {
+        selected_date: state.selected_date,
+        daily_logs: &state.daily_logs,
+        focused_section: &state.focused_section,
+    };
+
+    render_food_list_section(
+        f,
+        chunks[1],
+        ctx,
+        food_list_state,
+        state.food_list_focused,
+        click_targets.as_deref_mut(),
+    );
+
+    render_sokay_section(
+        f,
+        chunks[2],
+        ctx,
+        sokay_list_state,
+        state.sokay_list_focused,
+        click_targets,
+    );
+
+    let help_tiers: &[&str] = &[
+        " Shift+J/K: Section | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | Space: Shortcuts | Esc: Back",
+        " Shift+J/K: Section | Enter: Add | e: Edit | d: Delete | Space: More | Esc: Back",
+        " Space: Shortcuts | Esc: Back",
+    ];
+    render_help(f, chunks[3], help_tiers, true, false);
+}
+
 /// Renders the `-s` quick-entry variant of the daily view: a centered window
 /// holding only the Running, Food, and Notes sections. Sections hidden here
 /// (Measurements, Sokay, Strength & Mobility) register no click targets, so
@@ -175,16 +338,7 @@ fn render_simple_daily_view(
     edit: Option<InPlaceEdit>,
     mut click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let window = crate::ui::components::centered_rect(f.area(), 70, 85);
-    f.render_widget(Clear, window);
-
-    let frame_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Green))
-        .padding(ratatui::widgets::Padding::new(3, 3, 1, 1));
-    let inner = frame_block.inner(window);
-    f.render_widget(frame_block, window);
+    let inner = render_compact_frame(f);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -232,7 +386,7 @@ fn render_simple_daily_view(
         click_targets.as_deref_mut(),
     );
 
-    render_notes_section(f, chunks[3], ctx, click_targets.as_deref_mut());
+    render_notes_section(f, chunks[3], ctx, 0, click_targets.as_deref_mut());
 
     let help_tiers: &[&str] = if edit.is_some() {
         &[
@@ -661,7 +815,7 @@ fn render_sokay_section(
             date_input_error: None,
             config_sync_focused_field: crate::models::ConfigSyncField::DbUrl,
             config_sync_status: None,
-            simple_mode: false,
+            view_mode: ViewMode::Full,
             frame_width: 0,
             frame_height: 0,
         },
@@ -798,6 +952,7 @@ fn render_notes_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
     ctx: SectionCtx,
+    scroll_offset: u16,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
     let log = ctx
@@ -836,7 +991,8 @@ fn render_notes_section(
     let notes_widget = Paragraph::new(notes_text)
         .style(Style::default().fg(Color::Green))
         .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .scroll((scroll_offset, 0));
     f.render_widget(notes_widget, area);
     if let Some(click_targets) = click_targets {
         click_targets.push(ClickTarget::new(inner, ClickAction::Notes));
@@ -1148,7 +1304,7 @@ mod tests {
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut state = AppState::new();
-        state.simple_mode = true;
+        state.view_mode = ViewMode::Simple;
         let mut food_state = ListState::default();
         let mut sokay_state = ListState::default();
         let mut targets = Vec::new();
@@ -1201,7 +1357,7 @@ mod tests {
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut state = AppState::new();
-        state.simple_mode = true;
+        state.view_mode = ViewMode::Simple;
         let mut food_state = ListState::default();
         let mut sokay_state = ListState::default();
 
@@ -1241,7 +1397,7 @@ mod tests {
         let backend = TestBackend::new(160, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut state = AppState::new();
-        state.simple_mode = true;
+        state.view_mode = ViewMode::Simple;
         let mut food_state = ListState::default();
         let mut sokay_state = ListState::default();
 
@@ -1377,5 +1533,82 @@ mod tests {
             }
         }
         cells
+    }
+
+    /// Renders the daily view at 120x40 in `mode`, returning the drawn text
+    /// (row-major), the buffer, and the registered click targets.
+    fn render_compact(mode: ViewMode) -> (String, ratatui::buffer::Buffer, Vec<ClickTarget>) {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut state = AppState::new();
+        state.view_mode = mode;
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+        let mut targets = Vec::new();
+
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    &state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    None,
+                    Some(&mut targets),
+                );
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer().clone();
+        let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        (rendered, buffer, targets)
+    }
+
+    // Notes mode (`-n`): only Notes renders, inside the centered window.
+    #[test]
+    fn notes_mode_shows_only_notes_in_centered_window() {
+        let (rendered, buffer, targets) = render_compact(ViewMode::Notes);
+        assert!(rendered.contains("Notes - "));
+        assert!(!rendered.contains("Miles"));
+        assert!(!rendered.contains("Food"));
+        assert!(!rendered.contains("Sokay"));
+        assert!(!rendered.contains("Weight"));
+        assert!(!rendered.contains("Strength"));
+        for y in 0..40 {
+            assert_eq!(buffer[(0, y)].symbol(), " ");
+        }
+        assert!(targets.iter().all(|t| t.action == ClickAction::Notes));
+        assert!(!targets.is_empty());
+    }
+
+    // Food mode (`-f`): only Food and Sokay render, inside the centered window.
+    #[test]
+    fn food_mode_shows_only_food_and_sokay_in_centered_window() {
+        let (rendered, buffer, targets) = render_compact(ViewMode::Food);
+        assert!(rendered.contains("Food - "));
+        assert!(rendered.contains("Sokay"));
+        assert!(!rendered.contains("Miles"));
+        assert!(!rendered.contains("Notes"));
+        assert!(!rendered.contains("Weight"));
+        assert!(!rendered.contains("Strength"));
+        for y in 0..40 {
+            assert_eq!(buffer[(0, y)].symbol(), " ");
+        }
+        assert!(
+            !targets
+                .iter()
+                .any(|t| matches!(t.action, ClickAction::Notes | ClickAction::EditField(_)))
+        );
+    }
+
+    // Notes mode scrolls only once text overflows the Notes box. At 120x40 the
+    // box is 76 wide (72 text columns) with 20 visible text lines.
+    #[test]
+    fn notes_mode_max_scroll_matches_window_geometry() {
+        let fits = "line\n".repeat(20);
+        assert_eq!(notes_mode_max_scroll(&fits, 120, 40), 0);
+        let overflow = "line\n".repeat(25);
+        assert_eq!(notes_mode_max_scroll(&overflow, 120, 40), 6);
     }
 }

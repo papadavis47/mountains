@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use super::daily_view::render_daily_view_screen;
-use crate::models::AppState;
+use crate::models::{AppState, ViewMode};
 use crate::ui::components::centered_rect;
 
 /// Renders the shortcuts help overlay on the daily view screen
@@ -27,8 +27,9 @@ pub fn render_shortcuts_help_screen(
         None,
     );
 
-    let shortcuts_text = if state.simple_mode {
-        "\
+    let shortcuts_text = match state.view_mode {
+        ViewMode::Simple => {
+            "\
 Activity:
   m - Edit miles covered
   l - Edit elevation gain
@@ -46,8 +47,38 @@ With any focused section, press Enter to place cursor
 
 
 Press Space or Esc to close this modal"
-    } else {
-        "\
+        }
+        ViewMode::Notes => {
+            "\
+Notes:
+  n - Edit daily notes
+  j/k - Scroll notes
+  Alt+Enter - Insert newline
+
+Press Enter to save notes, or Esc to exit field
+
+With Notes focused, press Enter to place cursor
+
+
+Press Space or Esc to close this modal"
+        }
+        ViewMode::Food => {
+            "\
+Nutrition:
+  f - Add food item
+  c - Add sokay entry
+  Shift+J/K - Switch between Food and Sokay
+  j/k - Select item in list
+  e - Edit selected item
+  d - Delete selected item
+
+Press Enter to save entry, or Esc to exit field
+
+
+Press Space or Esc to close this modal"
+        }
+        ViewMode::Full => {
+            "\
 Measurements:
   w - Edit weight
   s - Edit waist size
@@ -71,6 +102,7 @@ With any focused section, press Enter to place cursor
 
 
 Press Space or Esc to close this modal"
+        }
     };
 
     // Size the popup to the content (plus border + top/bottom padding) so the
@@ -190,7 +222,7 @@ mod tests {
         let backend = TestBackend::new(120, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut state = AppState::new();
-        state.simple_mode = true;
+        state.view_mode = ViewMode::Simple;
         let mut food_state = ListState::default();
         let mut sokay_state = ListState::default();
 
@@ -213,5 +245,48 @@ mod tests {
         assert!(!rendered.contains("waist"));
         assert!(!rendered.contains("sokay"));
         assert!(!rendered.contains("strength"));
+    }
+
+    fn render_overlay(mode: ViewMode) -> String {
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut state = AppState::new();
+        state.view_mode = mode;
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+
+        terminal
+            .draw(|frame| {
+                render_shortcuts_help_screen(frame, &state, &mut food_state, &mut sokay_state, "");
+            })
+            .unwrap();
+
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn notes_mode_shortcuts_overlay_lists_only_notes_keys() {
+        let rendered = render_overlay(ViewMode::Notes);
+        assert!(rendered.contains("Edit daily notes"));
+        assert!(!rendered.contains("miles"));
+        assert!(!rendered.contains("food"));
+        assert!(!rendered.contains("sokay"));
+        assert!(!rendered.contains("weight"));
+    }
+
+    #[test]
+    fn food_mode_shortcuts_overlay_lists_only_food_and_sokay_keys() {
+        let rendered = render_overlay(ViewMode::Food);
+        assert!(rendered.contains("Add food item"));
+        assert!(rendered.contains("Add sokay entry"));
+        assert!(!rendered.contains("miles"));
+        assert!(!rendered.contains("notes"));
+        assert!(!rendered.contains("weight"));
     }
 }

@@ -2,7 +2,7 @@ use crate::db_manager::DbManager;
 use crate::file_manager::FileManager;
 use crate::models::{
     AppScreen, AppState, DailyLog, FocusedSection, FoodEntry, MeasurementField, RunningField,
-    field_accessor::FieldType,
+    ViewMode, field_accessor::FieldType,
 };
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::Arc;
@@ -262,18 +262,24 @@ impl InputHandler {
 pub struct SectionNavigator;
 
 impl SectionNavigator {
-    /// In simple mode only Running, Food, and Notes are visible, so traversal
-    /// cycles those three; a hidden section (unreachable in practice) recovers
-    /// to Running, the top visible section.
-    pub fn move_focus_down(current: &FocusedSection, simple: bool) -> FocusedSection {
-        if simple {
-            return match current {
-                FocusedSection::Running { .. } => FocusedSection::FoodItems,
-                FocusedSection::FoodItems => FocusedSection::Notes,
-                _ => FocusedSection::Running {
-                    focused_field: RunningField::Miles,
-                },
-            };
+    /// Compact view modes cycle only their visible sections: Simple cycles
+    /// Running, Food, and Notes; Food mode toggles Food and Sokay; Notes mode
+    /// stays on Notes. A hidden section (unreachable in practice) recovers to
+    /// the mode's top visible section.
+    pub fn move_focus_down(current: &FocusedSection, mode: ViewMode) -> FocusedSection {
+        match mode {
+            ViewMode::Simple => {
+                return match current {
+                    FocusedSection::Running { .. } => FocusedSection::FoodItems,
+                    FocusedSection::FoodItems => FocusedSection::Notes,
+                    _ => FocusedSection::Running {
+                        focused_field: RunningField::Miles,
+                    },
+                };
+            }
+            ViewMode::Notes => return FocusedSection::Notes,
+            ViewMode::Food => return Self::toggle_food_sokay(current),
+            ViewMode::Full => {}
         }
         match current {
             FocusedSection::Measurements { .. } => FocusedSection::Running {
@@ -289,15 +295,20 @@ impl SectionNavigator {
         }
     }
 
-    pub fn move_focus_up(current: &FocusedSection, simple: bool) -> FocusedSection {
-        if simple {
-            return match current {
-                FocusedSection::Running { .. } => FocusedSection::Notes,
-                FocusedSection::Notes => FocusedSection::FoodItems,
-                _ => FocusedSection::Running {
-                    focused_field: RunningField::Miles,
-                },
-            };
+    pub fn move_focus_up(current: &FocusedSection, mode: ViewMode) -> FocusedSection {
+        match mode {
+            ViewMode::Simple => {
+                return match current {
+                    FocusedSection::Running { .. } => FocusedSection::Notes,
+                    FocusedSection::Notes => FocusedSection::FoodItems,
+                    _ => FocusedSection::Running {
+                        focused_field: RunningField::Miles,
+                    },
+                };
+            }
+            ViewMode::Notes => return FocusedSection::Notes,
+            ViewMode::Food => return Self::toggle_food_sokay(current),
+            ViewMode::Full => {}
         }
         match current {
             FocusedSection::Measurements { .. } => FocusedSection::Notes,
@@ -313,16 +324,31 @@ impl SectionNavigator {
         }
     }
 
+    /// Food mode has two sections, so Shift+J and Shift+K both toggle.
+    fn toggle_food_sokay(current: &FocusedSection) -> FocusedSection {
+        match current {
+            FocusedSection::FoodItems => FocusedSection::Sokay,
+            _ => FocusedSection::FoodItems,
+        }
+    }
+
     /// Section/field to focus after a single-value field is saved with data,
     /// stepping one field forward in entry order and wrapping Notes → Weight
     /// (Notes → Miles in simple mode, whose entry order is Miles → Elevation →
-    /// Food → Notes). Food/Sokay are focus-only landing spots (their
-    /// add-dialogs handle repeat entry), so nothing auto-opens here.
-    pub fn advance_field(field: FieldType, simple: bool) -> FocusedSection {
-        if simple && field == FieldType::Notes {
-            return FocusedSection::Running {
-                focused_field: RunningField::Miles,
-            };
+    /// Food → Notes; Notes stays on Notes in notes mode, its only field).
+    /// Food/Sokay are focus-only landing spots (their add-dialogs handle
+    /// repeat entry), so nothing auto-opens here.
+    pub fn advance_field(field: FieldType, mode: ViewMode) -> FocusedSection {
+        if field == FieldType::Notes {
+            match mode {
+                ViewMode::Simple => {
+                    return FocusedSection::Running {
+                        focused_field: RunningField::Miles,
+                    };
+                }
+                ViewMode::Notes => return FocusedSection::Notes,
+                ViewMode::Full | ViewMode::Food => {}
+            }
         }
         match field {
             FieldType::Weight => FocusedSection::Measurements {
@@ -363,11 +389,18 @@ impl SectionNavigator {
         }
     }
 
-    /// Whether a DailyView key is available. Simple mode disables the keys
-    /// that reach its hidden sections (w: weight, s: waist, t: strength,
-    /// c: sokay) plus S (startup); everything else stays active.
-    pub fn daily_view_key_enabled(key: char, simple: bool) -> bool {
-        !(simple && matches!(key, 'w' | 's' | 't' | 'c' | 'S'))
+    /// Whether a DailyView key is available. Compact view modes disable the
+    /// keys that reach their hidden sections (w: weight, s: waist, m: miles,
+    /// l: elevation, f: food, c: sokay, t: strength, n: notes) plus S
+    /// (startup); everything else stays active.
+    pub fn daily_view_key_enabled(key: char, mode: ViewMode) -> bool {
+        let disabled: &[char] = match mode {
+            ViewMode::Full => &[],
+            ViewMode::Simple => &['w', 's', 't', 'c', 'S'],
+            ViewMode::Notes => &['w', 's', 'm', 'l', 'f', 'c', 't', 'S'],
+            ViewMode::Food => &['w', 's', 'm', 'l', 't', 'n', 'S'],
+        };
+        !disabled.contains(&key)
     }
 
     pub fn toggle_internal_focus(current: &FocusedSection) -> FocusedSection {
@@ -759,35 +792,35 @@ mod tests {
         #[test]
         fn test_advance_field_full_chain() {
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Weight, false),
+                SectionNavigator::advance_field(FieldType::Weight, ViewMode::Full),
                 FocusedSection::Measurements {
                     focused_field: MeasurementField::Waist
                 }
             );
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Waist, false),
+                SectionNavigator::advance_field(FieldType::Waist, ViewMode::Full),
                 FocusedSection::Running {
                     focused_field: RunningField::Miles
                 }
             );
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Miles, false),
+                SectionNavigator::advance_field(FieldType::Miles, ViewMode::Full),
                 FocusedSection::Running {
                     focused_field: RunningField::Elevation
                 }
             );
             // Elevation advances into the Food list (focus only, no dialog).
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Elevation, false),
+                SectionNavigator::advance_field(FieldType::Elevation, ViewMode::Full),
                 FocusedSection::FoodItems
             );
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::StrengthMobility, false),
+                SectionNavigator::advance_field(FieldType::StrengthMobility, ViewMode::Full),
                 FocusedSection::Notes
             );
             // Notes wraps back to the top of the chain.
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Notes, false),
+                SectionNavigator::advance_field(FieldType::Notes, ViewMode::Full),
                 FocusedSection::Measurements {
                     focused_field: MeasurementField::Weight
                 }
@@ -839,15 +872,15 @@ mod tests {
                 focused_field: RunningField::Miles,
             };
             assert_eq!(
-                SectionNavigator::move_focus_down(&running, true),
+                SectionNavigator::move_focus_down(&running, ViewMode::Simple),
                 FocusedSection::FoodItems
             );
             assert_eq!(
-                SectionNavigator::move_focus_down(&FocusedSection::FoodItems, true),
+                SectionNavigator::move_focus_down(&FocusedSection::FoodItems, ViewMode::Simple),
                 FocusedSection::Notes
             );
             assert_eq!(
-                SectionNavigator::move_focus_down(&FocusedSection::Notes, true),
+                SectionNavigator::move_focus_down(&FocusedSection::Notes, ViewMode::Simple),
                 running
             );
         }
@@ -858,15 +891,15 @@ mod tests {
                 focused_field: RunningField::Miles,
             };
             assert_eq!(
-                SectionNavigator::move_focus_up(&running, true),
+                SectionNavigator::move_focus_up(&running, ViewMode::Simple),
                 FocusedSection::Notes
             );
             assert_eq!(
-                SectionNavigator::move_focus_up(&FocusedSection::FoodItems, true),
+                SectionNavigator::move_focus_up(&FocusedSection::FoodItems, ViewMode::Simple),
                 running
             );
             assert_eq!(
-                SectionNavigator::move_focus_up(&FocusedSection::Notes, true),
+                SectionNavigator::move_focus_up(&FocusedSection::Notes, ViewMode::Simple),
                 FocusedSection::FoodItems
             );
         }
@@ -879,8 +912,14 @@ mod tests {
                 focused_field: RunningField::Miles,
             };
             let hidden = FocusedSection::Sokay;
-            assert_eq!(SectionNavigator::move_focus_down(&hidden, true), running);
-            assert_eq!(SectionNavigator::move_focus_up(&hidden, true), running);
+            assert_eq!(
+                SectionNavigator::move_focus_down(&hidden, ViewMode::Simple),
+                running
+            );
+            assert_eq!(
+                SectionNavigator::move_focus_up(&hidden, ViewMode::Simple),
+                running
+            );
         }
 
         // Simple mode disables keys that reach hidden sections (w: weight,
@@ -889,12 +928,24 @@ mod tests {
         #[test]
         fn simple_mode_gates_hidden_section_keys() {
             for key in ['w', 's', 't', 'c', 'S'] {
-                assert!(!SectionNavigator::daily_view_key_enabled(key, true));
-                assert!(SectionNavigator::daily_view_key_enabled(key, false));
+                assert!(!SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Simple
+                ));
+                assert!(SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Full
+                ));
             }
             for key in ['m', 'l', 'f', 'n', 'q', ' '] {
-                assert!(SectionNavigator::daily_view_key_enabled(key, true));
-                assert!(SectionNavigator::daily_view_key_enabled(key, false));
+                assert!(SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Simple
+                ));
+                assert!(SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Full
+                ));
             }
         }
 
@@ -903,21 +954,90 @@ mod tests {
         #[test]
         fn simple_mode_advance_field_chain() {
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Miles, true),
+                SectionNavigator::advance_field(FieldType::Miles, ViewMode::Simple),
                 FocusedSection::Running {
                     focused_field: RunningField::Elevation
                 }
             );
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Elevation, true),
+                SectionNavigator::advance_field(FieldType::Elevation, ViewMode::Simple),
                 FocusedSection::FoodItems
             );
             assert_eq!(
-                SectionNavigator::advance_field(FieldType::Notes, true),
+                SectionNavigator::advance_field(FieldType::Notes, ViewMode::Simple),
                 FocusedSection::Running {
                     focused_field: RunningField::Miles
                 }
             );
+        }
+
+        // Notes mode shows only Notes: Shift+J/K and auto-advance stay put.
+        #[test]
+        fn notes_mode_focus_and_advance_stay_on_notes() {
+            let notes = FocusedSection::Notes;
+            assert_eq!(
+                SectionNavigator::move_focus_down(&notes, ViewMode::Notes),
+                notes
+            );
+            assert_eq!(
+                SectionNavigator::move_focus_up(&notes, ViewMode::Notes),
+                notes
+            );
+            assert_eq!(
+                SectionNavigator::advance_field(FieldType::Notes, ViewMode::Notes),
+                notes
+            );
+        }
+
+        // Food mode shows Food and Sokay: Shift+J/K toggle between them, and a
+        // hidden section recovers to Food.
+        #[test]
+        fn food_mode_focus_toggles_food_and_sokay() {
+            for step in [
+                SectionNavigator::move_focus_down,
+                SectionNavigator::move_focus_up,
+            ] {
+                assert_eq!(
+                    step(&FocusedSection::FoodItems, ViewMode::Food),
+                    FocusedSection::Sokay
+                );
+                assert_eq!(
+                    step(&FocusedSection::Sokay, ViewMode::Food),
+                    FocusedSection::FoodItems
+                );
+                assert_eq!(
+                    step(&FocusedSection::Notes, ViewMode::Food),
+                    FocusedSection::FoodItems
+                );
+            }
+        }
+
+        #[test]
+        fn notes_and_food_modes_gate_hidden_section_keys() {
+            for key in ['w', 's', 'm', 'l', 'f', 'c', 't', 'S'] {
+                assert!(!SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Notes
+                ));
+            }
+            for key in ['n', 'q', ' '] {
+                assert!(SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Notes
+                ));
+            }
+            for key in ['w', 's', 'm', 'l', 'n', 't', 'S'] {
+                assert!(!SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Food
+                ));
+            }
+            for key in ['f', 'c', 'e', 'd', 'q', ' '] {
+                assert!(SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Food
+                ));
+            }
         }
     }
 

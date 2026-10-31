@@ -134,6 +134,22 @@ pub enum LaunchMode {
     Startup,
     Today,
     Simple,
+    Notes,
+    Food,
+}
+
+/// Which DailyView layout is active. `Full` is the normal full-screen view;
+/// the others (`-s`, `-n`, `-f` flags) show a subset of sections in a centered
+/// window. Reset to `Full` when leaving DailyView for Home.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewMode {
+    Full,
+    /// `-s`: Running, Food, and Notes.
+    Simple,
+    /// `-n`: Notes only.
+    Notes,
+    /// `-f`: Food and Sokay.
+    Food,
 }
 
 #[derive(Debug)]
@@ -150,9 +166,8 @@ pub struct AppState {
     pub date_input_error: Option<String>,
     pub config_sync_focused_field: ConfigSyncField,
     pub config_sync_status: Option<String>,
-    /// Simple entry mode (`-s` flag): DailyView shows only Running, Food, and
-    /// Notes in a centered window. Cleared when leaving DailyView for Home.
-    pub simple_mode: bool,
+    /// DailyView layout chosen by CLI flag (`-s`, `-n`, `-f`); `Full` otherwise.
+    pub view_mode: ViewMode,
     /// Last rendered frame size, used to bound multi-line section scrolling.
     pub frame_width: u16,
     pub frame_height: u16,
@@ -175,7 +190,7 @@ impl AppState {
             date_input_error: None,
             config_sync_focused_field: ConfigSyncField::DbUrl,
             config_sync_status: None,
-            simple_mode: false,
+            view_mode: ViewMode::Full,
             frame_width: 0,
             frame_height: 0,
         }
@@ -199,15 +214,17 @@ impl AppState {
         self.daily_logs.iter().find(|log| log.date == date)
     }
 
-    /// Returns to the Home screen from DailyView. Leaving DailyView ends
-    /// simple mode (`-s`): the rest of the session behaves like the full app.
+    /// Returns to the Home screen from DailyView. Leaving DailyView ends any
+    /// compact view mode (`-s`, `-n`, `-f`): the rest of the session behaves
+    /// like the full app.
     pub fn go_home_from_daily_view(&mut self) {
-        self.simple_mode = false;
+        self.view_mode = ViewMode::Full;
         self.current_screen = AppScreen::Home;
     }
 
-    /// Applies a CLI-selected launch mode: `Today`/`Simple` jump straight into
-    /// today's DailyView (creating the log if needed), bypassing Startup.
+    /// Applies a CLI-selected launch mode: every mode but `Startup` jumps
+    /// straight into today's DailyView (creating the log if needed), and the
+    /// compact modes also set their view mode and starting focus.
     pub fn apply_launch_mode(&mut self, mode: LaunchMode) {
         if mode == LaunchMode::Startup {
             return;
@@ -215,11 +232,22 @@ impl AppState {
         self.selected_date = chrono::Local::now().date_naive();
         self.get_or_create_daily_log(self.selected_date);
         self.current_screen = AppScreen::DailyView;
-        if mode == LaunchMode::Simple {
-            self.simple_mode = true;
-            self.focused_section = FocusedSection::Running {
-                focused_field: RunningField::Miles,
-            };
+        match mode {
+            LaunchMode::Simple => {
+                self.view_mode = ViewMode::Simple;
+                self.focused_section = FocusedSection::Running {
+                    focused_field: RunningField::Miles,
+                };
+            }
+            LaunchMode::Notes => {
+                self.view_mode = ViewMode::Notes;
+                self.focused_section = FocusedSection::Notes;
+            }
+            LaunchMode::Food => {
+                self.view_mode = ViewMode::Food;
+                self.focused_section = FocusedSection::FoodItems;
+            }
+            LaunchMode::Startup | LaunchMode::Today => {}
         }
     }
 }
@@ -234,7 +262,7 @@ mod tests {
         state.apply_launch_mode(LaunchMode::Startup);
         assert!(matches!(state.current_screen, AppScreen::Startup));
         assert!(state.daily_logs.is_empty());
-        assert!(!state.simple_mode);
+        assert_eq!(state.view_mode, ViewMode::Full);
     }
 
     #[test]
@@ -245,7 +273,7 @@ mod tests {
         assert!(matches!(state.current_screen, AppScreen::DailyView));
         assert_eq!(state.selected_date, today);
         assert!(state.get_daily_log(today).is_some());
-        assert!(!state.simple_mode);
+        assert_eq!(state.view_mode, ViewMode::Full);
     }
 
     #[test]
@@ -259,12 +287,14 @@ mod tests {
     }
 
     #[test]
-    fn going_home_from_daily_view_clears_simple_mode() {
-        let mut state = AppState::new();
-        state.apply_launch_mode(LaunchMode::Simple);
-        state.go_home_from_daily_view();
-        assert!(matches!(state.current_screen, AppScreen::Home));
-        assert!(!state.simple_mode);
+    fn going_home_from_daily_view_clears_compact_view_modes() {
+        for mode in [LaunchMode::Simple, LaunchMode::Notes, LaunchMode::Food] {
+            let mut state = AppState::new();
+            state.apply_launch_mode(mode);
+            state.go_home_from_daily_view();
+            assert!(matches!(state.current_screen, AppScreen::Home));
+            assert_eq!(state.view_mode, ViewMode::Full);
+        }
     }
 
     #[test]
@@ -275,12 +305,34 @@ mod tests {
         assert!(matches!(state.current_screen, AppScreen::DailyView));
         assert_eq!(state.selected_date, today);
         assert!(state.get_daily_log(today).is_some());
-        assert!(state.simple_mode);
+        assert_eq!(state.view_mode, ViewMode::Simple);
         assert_eq!(
             state.focused_section,
             FocusedSection::Running {
                 focused_field: RunningField::Miles
             }
         );
+    }
+
+    #[test]
+    fn launch_mode_notes_opens_daily_view_focused_on_notes() {
+        let mut state = AppState::new();
+        state.apply_launch_mode(LaunchMode::Notes);
+        let today = chrono::Local::now().date_naive();
+        assert!(matches!(state.current_screen, AppScreen::DailyView));
+        assert!(state.get_daily_log(today).is_some());
+        assert_eq!(state.view_mode, ViewMode::Notes);
+        assert_eq!(state.focused_section, FocusedSection::Notes);
+    }
+
+    #[test]
+    fn launch_mode_food_opens_daily_view_focused_on_food() {
+        let mut state = AppState::new();
+        state.apply_launch_mode(LaunchMode::Food);
+        let today = chrono::Local::now().date_naive();
+        assert!(matches!(state.current_screen, AppScreen::DailyView));
+        assert!(state.get_daily_log(today).is_some());
+        assert_eq!(state.view_mode, ViewMode::Food);
+        assert_eq!(state.focused_section, FocusedSection::FoodItems);
     }
 }

@@ -90,7 +90,7 @@ impl App {
                     // Focus-only — the next field isn't auto-opened.
                     let advance = entered && self.state.edit_origin == EditOrigin::Navigation;
                     let next_focus = if advance {
-                        SectionNavigator::advance_field(field_type, self.state.simple_mode)
+                        SectionNavigator::advance_field(field_type, self.state.view_mode)
                     } else {
                         SectionNavigator::field_section(field_type)
                     };
@@ -690,5 +690,48 @@ mod tests {
             FocusedSection::Notes,
             "'n' is a targeted edit, so focus stays on Notes"
         );
+    }
+
+    /// Notes mode (`-n`) only lets keys reach Notes: `f` opens nothing, while
+    /// Enter edits the focused Notes and a save keeps focus there.
+    #[tokio::test]
+    async fn notes_mode_ignores_food_key_and_stays_on_notes_after_save() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        app.apply_launch_mode(crate::models::LaunchMode::Notes);
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('f'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert!(matches!(app.state.current_screen, AppScreen::DailyView));
+
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.input_handler.set_input("easy day".to_string());
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert_eq!(app.state.focused_section, FocusedSection::Notes);
+    }
+
+    /// Food mode (`-f`) keeps Food and Sokay entry: `c` opens the sokay
+    /// dialog, while `n` (Notes is hidden) does nothing.
+    #[tokio::test]
+    async fn food_mode_allows_sokay_key_but_ignores_notes_key() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        app.apply_launch_mode(crate::models::LaunchMode::Food);
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('n'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert!(matches!(app.state.current_screen, AppScreen::DailyView));
+        assert_eq!(app.state.focused_section, FocusedSection::FoodItems);
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('c'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert!(matches!(app.state.current_screen, AppScreen::AddSokay));
     }
 }
