@@ -136,10 +136,11 @@ pub enum LaunchMode {
     Simple,
     Notes,
     Food,
+    Exercise,
 }
 
 /// Which DailyView layout is active. `Full` is the normal full-screen view;
-/// the others (`-s`, `-n`, `-f` flags) show a subset of sections in a centered
+/// the others (`-s`, `-n`, `-f`, `-e` flags) show a subset of sections in a centered
 /// window. Reset to `Full` when leaving DailyView for Home.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ViewMode {
@@ -150,6 +151,8 @@ pub enum ViewMode {
     Notes,
     /// `-f`: Food and Sokay.
     Food,
+    /// `-e`: Strength & Mobility only.
+    Exercise,
 }
 
 #[derive(Debug)]
@@ -215,7 +218,7 @@ impl AppState {
     }
 
     /// Returns to the Home screen from DailyView. Leaving DailyView ends any
-    /// compact view mode (`-s`, `-n`, `-f`): the rest of the session behaves
+    /// compact view mode (`-s`, `-n`, `-f`, `-e`): the rest of the session behaves
     /// like the full app.
     pub fn go_home_from_daily_view(&mut self) {
         self.view_mode = ViewMode::Full;
@@ -246,6 +249,10 @@ impl AppState {
             LaunchMode::Food => {
                 self.view_mode = ViewMode::Food;
                 self.focused_section = FocusedSection::FoodItems;
+            }
+            LaunchMode::Exercise => {
+                self.view_mode = ViewMode::Exercise;
+                self.focused_section = FocusedSection::StrengthMobility;
             }
             LaunchMode::Startup | LaunchMode::Today => {}
         }
@@ -288,7 +295,12 @@ mod tests {
 
     #[test]
     fn going_home_from_daily_view_clears_compact_view_modes() {
-        for mode in [LaunchMode::Simple, LaunchMode::Notes, LaunchMode::Food] {
+        for mode in [
+            LaunchMode::Simple,
+            LaunchMode::Notes,
+            LaunchMode::Food,
+            LaunchMode::Exercise,
+        ] {
             let mut state = AppState::new();
             state.apply_launch_mode(mode);
             state.go_home_from_daily_view();
@@ -334,5 +346,16 @@ mod tests {
         assert!(state.get_daily_log(today).is_some());
         assert_eq!(state.view_mode, ViewMode::Food);
         assert_eq!(state.focused_section, FocusedSection::FoodItems);
+    }
+
+    #[test]
+    fn launch_mode_exercise_opens_daily_view_focused_on_strength_mobility() {
+        let mut state = AppState::new();
+        state.apply_launch_mode(LaunchMode::Exercise);
+        let today = chrono::Local::now().date_naive();
+        assert!(matches!(state.current_screen, AppScreen::DailyView));
+        assert!(state.get_daily_log(today).is_some());
+        assert_eq!(state.view_mode, ViewMode::Exercise);
+        assert_eq!(state.focused_section, FocusedSection::StrengthMobility);
     }
 }

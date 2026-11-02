@@ -715,6 +715,38 @@ mod tests {
         assert_eq!(app.state.focused_section, FocusedSection::Notes);
     }
 
+    /// Exercise mode (`-e`) only lets keys reach Strength & Mobility: `n`
+    /// opens nothing, while Enter edits it and a save keeps focus there.
+    #[tokio::test]
+    async fn exercise_mode_ignores_notes_key_and_stays_on_strength_after_save() {
+        let dir = TempDir::new().unwrap();
+        let mut app = test_app(&dir).await;
+        app.apply_launch_mode(crate::models::LaunchMode::Exercise);
+
+        app.handle_key_event_with_modifiers(KeyCode::Char('n'), KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert!(matches!(app.state.current_screen, AppScreen::DailyView));
+
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        app.input_handler.set_input("3x10 pushups".to_string());
+        app.handle_key_event_with_modifiers(KeyCode::Enter, KeyModifiers::NONE)
+            .await
+            .unwrap();
+        assert_eq!(app.state.focused_section, FocusedSection::StrengthMobility);
+        let today = chrono::Local::now().date_naive();
+        assert_eq!(
+            app.state
+                .get_daily_log(today)
+                .unwrap()
+                .strength_mobility
+                .as_deref(),
+            Some("3x10 pushups")
+        );
+    }
+
     /// Food mode (`-f`) keeps Food and Sokay entry: `c` opens the sokay
     /// dialog, while `n` (Notes is hidden) does nothing.
     #[tokio::test]

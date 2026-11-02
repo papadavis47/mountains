@@ -119,6 +119,7 @@ The daily view shows all sections for tracking your training day: **Measurements
   - While editing a numeric field, Tab first saves the value and then performs the same bidirectional toggle
 - The focused field is indicated with a **► symbol**
 - **Unset fields** show a dimmed inline placeholder (e.g. `Weight: Press 'w' to add`) in place of the value; it disappears per-field once that field has a value, mirroring the Food/Sokay/Notes placeholders
+- **Sokay explainer** - while the selected day has no sokay entries, the Sokay section shows its add prompt plus a short definition (muted `placeholder_style` DarkGray, like the `Press 'w' to add` placeholders; link to https://github.com/papadavis47/sokay additionally italic + underlined). Built by `sokay_empty_state` and rendered as a wrapping `Paragraph`; it disappears once an entry exists. Kept to 4 lines so it fits the full view's Sokay box on a 40-row terminal
 
 #### List Navigation (Food Items & Sokay sections only)
 
@@ -291,6 +292,7 @@ Parsed in `main.rs` (`handle_cli_args`) before the TUI starts, so they print to 
 - `-s` / `--simple` - Launch directly into today's log in **simple quick-entry mode** (see below); implies `-t`
 - `-n` / `--notes` - Launch directly into today's log in **notes mode** (Notes only, see below); implies `-t`
 - `-f` / `--food` - Launch directly into today's log in **food mode** (Food and Sokay only, see below); implies `-t`
+- `-e` / `--exercise` - Launch directly into today's log in **exercise mode** (Strength & Mobility only, see below); implies `-t`
 - `-V` / `--version` - Print `mountains <version>` (version sourced from `CARGO_PKG_VERSION`, auto-synced to Cargo.toml) and exit 0
 - `-h` / `--help` - Print usage/help (the `HELP_TEXT` const) and exit 0
 - Unrecognized argument - Print error + help to stderr and exit 2
@@ -310,12 +312,13 @@ A compact DailyView variant for fast daily entry:
 - Mouse targets derive from what's drawn, so hidden sections aren't clickable
 - `q` quits with the normal sync flow; `Esc` goes to Home **and ends simple mode** — the rest of the session behaves like the full app (re-opening a day shows the full view)
 
-### Notes Mode (`-n`) and Food Mode (`-f`)
+### Notes Mode (`-n`), Food Mode (`-f`), and Exercise Mode (`-e`)
 
-Two more compact DailyView variants sharing simple mode's centered window, exit semantics (`Esc` → Home ends the mode, `q` quits with sync), live-only Space overlay/footer, and drawn-only mouse targets. The active layout is `AppState.view_mode` (`ViewMode::{Full, Simple, Notes, Food}`).
+Three more compact DailyView variants sharing simple mode's centered window, exit semantics (`Esc` → Home ends the mode, `q` quits with sync), live-only Space overlay/footer, and drawn-only mouse targets. The active layout is `AppState.view_mode` (`ViewMode::{Full, Simple, Notes, Food, Exercise}`).
 
-- **Notes mode** - title "Notes - <date>"; only Notes, sized to fill the window and scrolled in place with `j`/`k` (clamped by `notes_mode_max_scroll`, which mirrors the window geometry). Opens with Notes focused, no editor open; `n`/Enter edits; a save keeps focus on Notes. All other section keys (`w`, `s`, `m`, `l`, `f`, `c`, `t`, `S`) are disabled.
+- **Notes mode** - title "Notes - <date>"; only Notes, sized to fill the window and scrolled in place with `j`/`k` (clamped by `single_section_max_scroll`, which mirrors the window geometry). Opens with Notes focused, no editor open; `n`/Enter edits; a save keeps focus on Notes. All other section keys (`w`, `s`, `m`, `l`, `f`, `c`, `t`, `S`) are disabled.
 - **Food mode** - title "Food - <date>"; only Food and Sokay lists. Opens focused on Food; `Shift+J/K` toggles Food ↔ Sokay; `f`, `c`, `j`/`k`, `e`, `d` work as in full mode. `w`, `s`, `m`, `l`, `t`, `n`, `S` are disabled.
+- **Exercise mode** - title "Strength & Mobility - <date>"; mirrors notes mode for Strength & Mobility (same `single_section_chunks` layout and `single_section_max_scroll` clamp). Opens focused on Strength & Mobility; `t`/Enter edits; a save keeps focus there. `w`, `s`, `m`, `l`, `f`, `c`, `n`, `S` are disabled.
 
 ## File Structure
 
@@ -424,7 +427,14 @@ committed pre-commit hook enforces this on every commit.
 
 ## Recent Improvements
 
-### Latest Session (Notes and Food Launch Modes)
+### Latest Session (Exercise Launch Mode and Sokay Explainer)
+
+- ✅ **`-e`/`--exercise` flag** - Centered window with only Strength & Mobility, filling the window and scrolling in place, for logging non-running workouts
+- ✅ **Shared single-section layout** - `notes_mode_chunks`/`notes_mode_max_scroll` generalized to `single_section_chunks`/`single_section_max_scroll`, used by notes and exercise modes
+- ✅ **Test coverage** - Parser, launch mode, traversal/gating, renderer, overlay, app-level save keeps focus
+- ✅ **Sokay explainer** - Empty Sokay section explains the term (muted placeholder-style text + link to the Sokay repo); hidden once the day has an entry. Covered by buffer-style tests in full and food mode
+
+### Previous Session (Notes and Food Launch Modes)
 
 - ✅ **`-n`/`--notes` flag** - Centered window with only Notes, filling the window and scrolling in place
 - ✅ **`-f`/`--food` flag** - Centered window with only Food and Sokay
@@ -486,8 +496,8 @@ committed pre-commit hook enforces this on every commit.
 
 - **DailyLog** - Main data model with food_entries, measurements, sokay_entries, strength_mobility, notes
 - **AppState** - Application state with daily_logs cache, current screen/selection, focused_section, edit_origin, view_mode, and date_input_error
-- **LaunchMode** - CLI-chosen start screen (Startup/Today/Simple/Notes/Food), applied by `AppState::apply_launch_mode`
-- **ViewMode** - Active DailyView layout (Full/Simple/Notes/Food); reset to Full when leaving DailyView for Home
+- **LaunchMode** - CLI-chosen start screen (Startup/Today/Simple/Notes/Food/Exercise), applied by `AppState::apply_launch_mode`
+- **ViewMode** - Active DailyView layout (Full/Simple/Notes/Food/Exercise); reset to Full when leaving DailyView for Home
 - **FocusedSection** - Enum tracking which section has focus (Measurements, Running, FoodItems, Sokay, StrengthMobility, Notes)
 - **EditOrigin** - Enum recording how the open editor was reached (Shortcut, Navigation); the save branch reads it to decide stay-put vs. auto-advance
 - **MeasurementField** - Enum for tracking focus within Measurements section (Weight, Waist)

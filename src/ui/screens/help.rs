@@ -62,6 +62,20 @@ With Notes focused, press Enter to place cursor
 
 Press Space or Esc to close this modal"
         }
+        ViewMode::Exercise => {
+            "\
+Strength & Mobility:
+  t - Edit strength & mobility
+  j/k - Scroll exercises
+  Alt+Enter - Insert newline
+
+Press Enter to save exercises, or Esc to exit field
+
+With Strength & Mobility focused, press Enter to place cursor
+
+
+Press Space or Esc to close this modal"
+        }
         ViewMode::Food => {
             "\
 Nutrition:
@@ -277,6 +291,16 @@ mod tests {
         assert!(!rendered.contains("miles"));
         assert!(!rendered.contains("food"));
         assert!(!rendered.contains("sokay"));
+        assert!(!rendered.contains("weight"));
+    }
+
+    #[test]
+    fn exercise_mode_shortcuts_overlay_lists_only_strength_keys() {
+        let rendered = render_overlay(ViewMode::Exercise);
+        assert!(rendered.contains("Edit strength & mobility"));
+        assert!(!rendered.contains("miles"));
+        assert!(!rendered.contains("food"));
+        assert!(!rendered.contains("notes"));
         assert!(!rendered.contains("weight"));
     }
 

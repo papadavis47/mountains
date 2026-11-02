@@ -2,7 +2,7 @@ use chrono::{Datelike, NaiveDate};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
@@ -52,6 +52,10 @@ pub fn render_daily_view_screen(
         }
         ViewMode::Notes => {
             render_notes_daily_view(f, state, sync_status, click_targets);
+            return;
+        }
+        ViewMode::Exercise => {
+            render_exercise_daily_view(f, state, sync_status, click_targets);
             return;
         }
         ViewMode::Food => {
@@ -135,7 +139,7 @@ pub fn render_daily_view_screen(
         click_targets.as_deref_mut(),
     );
 
-    render_strength_mobility_section(f, chunks[5], ctx, click_targets.as_deref_mut());
+    render_strength_mobility_section(f, chunks[5], ctx, 0, click_targets.as_deref_mut());
 
     render_notes_section(f, chunks[6], ctx, 0, click_targets.as_deref_mut());
 
@@ -182,7 +186,7 @@ pub fn render_daily_view_screen(
 }
 
 /// Border block of the centered window shared by the compact view modes
-/// (`-s`, `-n`, `-f`).
+/// (`-s`, `-n`, `-f`, `-e`).
 fn compact_frame_block() -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
@@ -204,27 +208,29 @@ fn render_compact_frame(f: &mut Frame) -> Rect {
     compact_inner(f.area())
 }
 
-/// Notes mode (`-n`) layout: title, Notes filling the middle, help footer.
-fn notes_mode_chunks(inner: Rect) -> std::rc::Rc<[Rect]> {
+/// Single-section mode (`-n`, `-e`) layout: title, the section filling the
+/// middle, help footer.
+fn single_section_chunks(inner: Rect) -> std::rc::Rc<[Rect]> {
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5), // Title
-            Constraint::Min(4),    // Notes section (fills the window)
+            Constraint::Min(4),    // Section (fills the window)
             Constraint::Length(3), // Help
         ])
         .split(inner)
 }
 
-/// Maximum Notes scroll offset in notes mode (`-n`), where Notes fills the
-/// compact window instead of expanding over the full-screen layout (see
-/// `max_scroll_offset`). Returns 0 when the text fits.
-pub fn notes_mode_max_scroll(text: &str, frame_width: u16, frame_height: u16) -> u16 {
-    let notes_area =
-        notes_mode_chunks(compact_inner(Rect::new(0, 0, frame_width, frame_height)))[1];
+/// Maximum scroll offset of the text section in a single-section mode (`-n`,
+/// `-e`), where the section fills the compact window instead of expanding
+/// over the full-screen layout (see `max_scroll_offset`). Returns 0 when the
+/// text fits.
+pub fn single_section_max_scroll(text: &str, frame_width: u16, frame_height: u16) -> u16 {
+    let section_area =
+        single_section_chunks(compact_inner(Rect::new(0, 0, frame_width, frame_height)))[1];
     // Border + 1 cell of horizontal padding on each side.
-    let width = notes_area.width.saturating_sub(4) as usize;
-    let visible_text_lines = notes_area.height.saturating_sub(2);
+    let width = section_area.width.saturating_sub(4) as usize;
+    let visible_text_lines = section_area.height.saturating_sub(2);
     let content_height = calculate_text_height(text, width) as u16;
     if content_height <= visible_text_lines {
         return 0;
@@ -241,7 +247,7 @@ fn render_notes_daily_view(
     sync_status: &str,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
-    let chunks = notes_mode_chunks(render_compact_frame(f));
+    let chunks = single_section_chunks(render_compact_frame(f));
 
     let title = format!(
         "Notes - {} {}",
@@ -259,6 +265,45 @@ fn render_notes_daily_view(
 
     let help_tiers: &[&str] = &[
         " Enter/n: Edit Notes | j/k: Scroll | Space: Shortcuts | Esc: Back",
+        " Enter: Edit | j/k: Scroll | Space: More | Esc: Back",
+        " Space: Shortcuts | Esc: Back",
+    ];
+    render_help(f, chunks[2], help_tiers, true, false);
+}
+
+/// Renders the `-e` exercise variant of the daily view: a centered window
+/// holding only the Strength & Mobility section, sized to fill the window and
+/// scrolled in place.
+fn render_exercise_daily_view(
+    f: &mut Frame,
+    state: &AppState,
+    sync_status: &str,
+    click_targets: Option<&mut Vec<ClickTarget>>,
+) {
+    let chunks = single_section_chunks(render_compact_frame(f));
+
+    let title = format!(
+        "Strength & Mobility - {} {}",
+        state.selected_date.format("%B %d, %Y"),
+        sync_status
+    );
+    render_title(f, chunks[0], &title);
+
+    let ctx = SectionCtx {
+        selected_date: state.selected_date,
+        daily_logs: &state.daily_logs,
+        focused_section: &state.focused_section,
+    };
+    render_strength_mobility_section(
+        f,
+        chunks[1],
+        ctx,
+        state.strength_mobility_scroll,
+        click_targets,
+    );
+
+    let help_tiers: &[&str] = &[
+        " Enter/t: Edit Exercises | j/k: Scroll | Space: Shortcuts | Esc: Back",
         " Enter: Edit | j/k: Scroll | Space: More | Esc: Back",
         " Space: Shortcuts | Esc: Back",
     ];
@@ -831,23 +876,6 @@ fn render_sokay_section(
             None
         };
 
-    let items: Vec<ListItem> = if let Some(log) = log {
-        if log.sokay_entries.is_empty() {
-            vec![ListItem::new("No sokay entries yet. Press 'c' to add one.")]
-        } else {
-            log.sokay_entries
-                .iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    let display = format!("- {}", entry);
-                    selectable_list_item(display, sokay_selected == Some(index))
-                })
-                .collect()
-        }
-    } else {
-        vec![ListItem::new("No sokay entries yet. Press 'c' to add one.")]
-    };
-
     let border_style = if matches!(ctx.focused_section, FocusedSection::Sokay) {
         Style::default().fg(Color::Magenta)
     } else {
@@ -860,8 +888,26 @@ fn render_sokay_section(
         .title(title)
         .padding(ratatui::widgets::Padding::uniform(1));
     let inner = block.inner(area);
-    let list = List::new(items).block(block);
-    f.render_stateful_widget(list, area, sokay_list_state);
+    if entry_count == 0 {
+        // A Paragraph (not a List) so the explainer wraps in narrow windows.
+        let empty_state = Paragraph::new(sokay_empty_state())
+            .block(block)
+            .wrap(ratatui::widgets::Wrap { trim: false });
+        f.render_widget(empty_state, area);
+    } else {
+        let items: Vec<ListItem> = log
+            .map(|log| log.sokay_entries.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let display = format!("- {}", entry);
+                selectable_list_item(display, sokay_selected == Some(index))
+            })
+            .collect();
+        let list = List::new(items).block(block);
+        f.render_stateful_widget(list, area, sokay_list_state);
+    }
 
     if let Some(click_targets) = click_targets {
         if entry_count == 0 {
@@ -876,6 +922,32 @@ fn render_sokay_section(
             );
         }
     }
+}
+
+const SOKAY_URL: &str = "https://github.com/papadavis47/sokay";
+
+/// Empty-day Sokay content: the add prompt, then a short, muted explainer of
+/// the term (same dimmed style as the "Press 'x' to add" placeholders)
+/// linking to the project it comes from. Hidden once the day has a sokay
+/// entry.
+fn sokay_empty_state() -> Vec<Line<'static>> {
+    vec![
+        Line::from("No sokay entries yet. Press 'c' to add one."),
+        Line::from(""),
+        Line::styled(
+            "sokay /soh-KAY/ — a moment you stray from your ideal way of eating.",
+            placeholder_style(),
+        ),
+        // Tagline and link share a line so all four lines fit the full
+        // view's Sokay box on a 40-row terminal.
+        Line::from(vec![
+            Span::styled("Log it, forgive it, keep going. ", placeholder_style()),
+            Span::styled(
+                SOKAY_URL,
+                placeholder_style().add_modifier(Modifier::ITALIC | Modifier::UNDERLINED),
+            ),
+        ]),
+    ]
 }
 
 fn push_visible_list_targets(
@@ -902,6 +974,7 @@ fn render_strength_mobility_section(
     f: &mut Frame,
     area: ratatui::layout::Rect,
     ctx: SectionCtx,
+    scroll_offset: u16,
     click_targets: Option<&mut Vec<ClickTarget>>,
 ) {
     let log = ctx
@@ -940,7 +1013,8 @@ fn render_strength_mobility_section(
     let sm_widget = Paragraph::new(sm_text)
         .style(Style::default().fg(Color::Cyan))
         .block(block)
-        .wrap(ratatui::widgets::Wrap { trim: false });
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .scroll((scroll_offset, 0));
     f.render_widget(sm_widget, area);
     if let Some(click_targets) = click_targets {
         click_targets.push(ClickTarget::new(inner, ClickAction::StrengthMobility));
@@ -1602,13 +1676,107 @@ mod tests {
         );
     }
 
-    // Notes mode scrolls only once text overflows the Notes box. At 120x40 the
-    // box is 76 wide (72 text columns) with 20 visible text lines.
+    // Single-section modes scroll only once text overflows the section box. At
+    // 120x40 the box is 76 wide (72 text columns) with 20 visible text lines.
     #[test]
-    fn notes_mode_max_scroll_matches_window_geometry() {
+    fn single_section_max_scroll_matches_window_geometry() {
         let fits = "line\n".repeat(20);
-        assert_eq!(notes_mode_max_scroll(&fits, 120, 40), 0);
+        assert_eq!(single_section_max_scroll(&fits, 120, 40), 0);
         let overflow = "line\n".repeat(25);
-        assert_eq!(notes_mode_max_scroll(&overflow, 120, 40), 6);
+        assert_eq!(single_section_max_scroll(&overflow, 120, 40), 6);
+    }
+
+    // Exercise mode (`-e`): only Strength & Mobility renders, inside the
+    // centered window.
+    #[test]
+    fn exercise_mode_shows_only_strength_mobility_in_centered_window() {
+        let (rendered, buffer, targets) = render_compact(ViewMode::Exercise);
+        assert!(rendered.contains("Strength & Mobility - "));
+        assert!(!rendered.contains("Miles"));
+        assert!(!rendered.contains("Food"));
+        assert!(!rendered.contains("Sokay"));
+        assert!(!rendered.contains("Weight"));
+        assert!(!rendered.contains("Notes"));
+        for y in 0..40 {
+            assert_eq!(buffer[(0, y)].symbol(), " ");
+        }
+        assert!(
+            targets
+                .iter()
+                .all(|t| t.action == ClickAction::StrengthMobility)
+        );
+        assert!(!targets.is_empty());
+    }
+
+    /// Finds the first cell of `needle` in the buffer (single-width text only).
+    fn find_cell(buffer: &ratatui::buffer::Buffer, needle: &str) -> Option<(u16, u16)> {
+        let width = buffer.area.width as usize;
+        let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        let index = rendered.find(needle)?;
+        let cells = rendered[..index].chars().count();
+        Some(((cells % width) as u16, (cells / width) as u16))
+    }
+
+    fn render_full(state: &AppState) -> ratatui::buffer::Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut food_state = ListState::default();
+        let mut sokay_state = ListState::default();
+        terminal
+            .draw(|frame| {
+                render_daily_view_screen(
+                    frame,
+                    state,
+                    &mut food_state,
+                    &mut sokay_state,
+                    "",
+                    None,
+                    None,
+                );
+            })
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    // An empty day explains "sokay" in the muted placeholder style.
+    #[test]
+    fn empty_sokay_section_shows_muted_explainer() {
+        let buffer = render_full(&AppState::new());
+        let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(rendered.contains("No sokay entries yet"));
+        assert!(rendered.contains(SOKAY_URL));
+
+        let (x, y) = find_cell(&buffer, "sokay /soh-KAY/").unwrap();
+        assert_eq!(buffer[(x, y)].fg, Color::DarkGray);
+        assert!(buffer[(x, y)].modifier.is_empty());
+
+        let (x, y) = find_cell(&buffer, SOKAY_URL).unwrap();
+        assert_eq!(buffer[(x, y)].fg, Color::DarkGray);
+        assert!(
+            buffer[(x, y)]
+                .modifier
+                .contains(Modifier::ITALIC | Modifier::UNDERLINED)
+        );
+    }
+
+    #[test]
+    fn sokay_explainer_hidden_once_day_has_an_entry() {
+        let mut state = AppState::new();
+        let mut log = crate::models::DailyLog::new(state.selected_date);
+        log.sokay_entries = vec!["Donut".to_string()];
+        state.daily_logs = vec![log];
+        let buffer = render_full(&state);
+        let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(rendered.contains("- Donut"));
+        assert!(!rendered.contains("soh-KAY"));
+        assert!(!rendered.contains(SOKAY_URL));
+    }
+
+    // Food mode's narrower window wraps the explainer instead of truncating it.
+    #[test]
+    fn food_mode_shows_full_sokay_explainer() {
+        let (rendered, _, _) = render_compact(ViewMode::Food);
+        assert!(rendered.contains("soh-KAY"));
+        assert!(rendered.contains("keep going."));
+        assert!(rendered.contains(SOKAY_URL));
     }
 }

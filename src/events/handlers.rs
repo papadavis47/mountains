@@ -263,8 +263,8 @@ pub struct SectionNavigator;
 
 impl SectionNavigator {
     /// Compact view modes cycle only their visible sections: Simple cycles
-    /// Running, Food, and Notes; Food mode toggles Food and Sokay; Notes mode
-    /// stays on Notes. A hidden section (unreachable in practice) recovers to
+    /// Running, Food, and Notes; Food mode toggles Food and Sokay; Notes and
+    /// Exercise modes stay on their one section. A hidden section (unreachable in practice) recovers to
     /// the mode's top visible section.
     pub fn move_focus_down(current: &FocusedSection, mode: ViewMode) -> FocusedSection {
         match mode {
@@ -278,6 +278,7 @@ impl SectionNavigator {
                 };
             }
             ViewMode::Notes => return FocusedSection::Notes,
+            ViewMode::Exercise => return FocusedSection::StrengthMobility,
             ViewMode::Food => return Self::toggle_food_sokay(current),
             ViewMode::Full => {}
         }
@@ -307,6 +308,7 @@ impl SectionNavigator {
                 };
             }
             ViewMode::Notes => return FocusedSection::Notes,
+            ViewMode::Exercise => return FocusedSection::StrengthMobility,
             ViewMode::Food => return Self::toggle_food_sokay(current),
             ViewMode::Full => {}
         }
@@ -335,10 +337,14 @@ impl SectionNavigator {
     /// Section/field to focus after a single-value field is saved with data,
     /// stepping one field forward in entry order and wrapping Notes → Weight
     /// (Notes → Miles in simple mode, whose entry order is Miles → Elevation →
-    /// Food → Notes; Notes stays on Notes in notes mode, its only field).
+    /// Food → Notes; Notes stays on Notes in notes mode, and Strength &
+    /// Mobility on itself in exercise mode, their only fields).
     /// Food/Sokay are focus-only landing spots (their add-dialogs handle
     /// repeat entry), so nothing auto-opens here.
     pub fn advance_field(field: FieldType, mode: ViewMode) -> FocusedSection {
+        if mode == ViewMode::Exercise && field == FieldType::StrengthMobility {
+            return FocusedSection::StrengthMobility;
+        }
         if field == FieldType::Notes {
             match mode {
                 ViewMode::Simple => {
@@ -347,7 +353,7 @@ impl SectionNavigator {
                     };
                 }
                 ViewMode::Notes => return FocusedSection::Notes,
-                ViewMode::Full | ViewMode::Food => {}
+                ViewMode::Full | ViewMode::Food | ViewMode::Exercise => {}
             }
         }
         match field {
@@ -399,6 +405,7 @@ impl SectionNavigator {
             ViewMode::Simple => &['w', 's', 't', 'c', 'S'],
             ViewMode::Notes => &['w', 's', 'm', 'l', 'f', 'c', 't', 'S'],
             ViewMode::Food => &['w', 's', 'm', 'l', 't', 'n', 'S'],
+            ViewMode::Exercise => &['w', 's', 'm', 'l', 'f', 'c', 'n', 'S'],
         };
         !disabled.contains(&key)
     }
@@ -987,6 +994,38 @@ mod tests {
                 SectionNavigator::advance_field(FieldType::Notes, ViewMode::Notes),
                 notes
             );
+        }
+
+        // Exercise mode shows only Strength & Mobility: Shift+J/K and
+        // auto-advance stay put.
+        #[test]
+        fn exercise_mode_focus_and_advance_stay_on_strength_mobility() {
+            let sm = FocusedSection::StrengthMobility;
+            assert_eq!(
+                SectionNavigator::move_focus_down(&sm, ViewMode::Exercise),
+                sm
+            );
+            assert_eq!(SectionNavigator::move_focus_up(&sm, ViewMode::Exercise), sm);
+            assert_eq!(
+                SectionNavigator::advance_field(FieldType::StrengthMobility, ViewMode::Exercise),
+                sm
+            );
+        }
+
+        #[test]
+        fn exercise_mode_gates_hidden_section_keys() {
+            for key in ['w', 's', 'm', 'l', 'f', 'c', 'n', 'S'] {
+                assert!(!SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Exercise
+                ));
+            }
+            for key in ['t', 'q', ' '] {
+                assert!(SectionNavigator::daily_view_key_enabled(
+                    key,
+                    ViewMode::Exercise
+                ));
+            }
         }
 
         // Food mode shows Food and Sokay: Shift+J/K toggle between them, and a

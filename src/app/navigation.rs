@@ -397,6 +397,13 @@ impl App {
             .get_daily_log(self.state.selected_date)
             .and_then(|l| l.strength_mobility.clone())
             .unwrap_or_default();
+        if self.state.view_mode == ViewMode::Exercise {
+            return screens::single_section_max_scroll(
+                &text,
+                self.state.frame_width,
+                self.state.frame_height,
+            );
+        }
         screens::max_scroll_offset(&text, self.state.frame_width, self.state.frame_height)
     }
 
@@ -407,7 +414,7 @@ impl App {
             .and_then(|l| l.notes.clone())
             .unwrap_or_default();
         if self.state.view_mode == ViewMode::Notes {
-            return screens::notes_mode_max_scroll(
+            return screens::single_section_max_scroll(
                 &text,
                 self.state.frame_width,
                 self.state.frame_height,

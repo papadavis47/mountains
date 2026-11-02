@@ -14,7 +14,7 @@ pub use confirmations::{
     render_confirm_delete_sokay_screen,
 };
 pub use daily_view::{
-    InPlaceEdit, max_scroll_offset, notes_mode_max_scroll, render_daily_view_screen,
+    InPlaceEdit, max_scroll_offset, render_daily_view_screen, single_section_max_scroll,
 };
 pub use help::{render_shortcuts_help_screen, render_syncing_screen};
 pub use home::render_home_screen;

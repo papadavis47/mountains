@@ -14,6 +14,8 @@ This is a TUI training log for trail running and food awareness.
 
 Track daily nutrition, body measurements, miles, elevation gain, strength & mobility work, and notes.
 
+A *sokay* (/soh-KAY/) is a moment you stray from your ideal way of eating: log it, forgive it, keep going. The idea comes from [Sokay](https://github.com/papadavis47/sokay).
+
 Works offline-first with a local `libsql` database at `~/.mountains/`.
 
 Optional Turso Cloud sync can be configured from within the app (press `c` on the startup screen).
@@ -75,6 +77,7 @@ mountains
 | `-s`, `--simple` | Open today's log in a compact quick-entry view (miles, elevation, food, notes only) |
 | `-n`, `--notes` | Open today's notes in a compact view |
 | `-f`, `--food` | Open today's food and sokay in a compact view |
+| `-e`, `--exercise` | Open today's strength & mobility in a compact view |
 | `-h`, `--help` | Print help |
 | `-V`, `--version` | Print version |
 

@@ -66,6 +66,7 @@ const HELP_TEXT: &str = concat!(
     "                     (miles, elevation, food, notes only)\n",
     "    -n, --notes      Open today's notes in a compact view\n",
     "    -f, --food       Open today's food and sokay in a compact view\n",
+    "    -e, --exercise   Open today's strength & mobility in a compact view\n",
     "    -h, --help       Print this help message\n",
     "    -V, --version    Print version information\n",
     "\n",
@@ -93,6 +94,7 @@ fn parse_cli_arg(arg: Option<&str>) -> CliAction {
         Some("-s") | Some("--simple") => CliAction::Launch(models::LaunchMode::Simple),
         Some("-n") | Some("--notes") => CliAction::Launch(models::LaunchMode::Notes),
         Some("-f") | Some("--food") => CliAction::Launch(models::LaunchMode::Food),
+        Some("-e") | Some("--exercise") => CliAction::Launch(models::LaunchMode::Exercise),
         Some("-V") | Some("--version") => CliAction::PrintVersion,
         Some("-h") | Some("--help") => CliAction::PrintHelp,
         Some(other) => CliAction::Unrecognized(other.to_string()),
@@ -186,6 +188,18 @@ mod tests {
         assert_eq!(
             parse_cli_arg(Some("--notes")),
             CliAction::Launch(LaunchMode::Notes)
+        );
+    }
+
+    #[test]
+    fn exercise_flags_launch_exercise_mode() {
+        assert_eq!(
+            parse_cli_arg(Some("-e")),
+            CliAction::Launch(LaunchMode::Exercise)
+        );
+        assert_eq!(
+            parse_cli_arg(Some("--exercise")),
+            CliAction::Launch(LaunchMode::Exercise)
         );
     }
 
