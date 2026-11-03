@@ -437,6 +437,14 @@ pub fn calculate_cursor_in_wrapped_text(
     (cursor_x, cursor_y)
 }
 
+/// Lines to scroll so the cursor line stays in a box `height` rows tall
+pub fn vertical_scroll_offset(cursor_line: u16, height: u16) -> u16 {
+    if height == 0 {
+        return 0;
+    }
+    cursor_line.saturating_sub(height - 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,5 +601,25 @@ mod tests {
             calculate_cursor_in_wrapped_text(origin(20, 4), "ab", 999, 10),
             (2, 0)
         );
+    }
+
+    // -- vertical_scroll_offset ----------------------------------------------
+
+    #[test]
+    fn scroll_zero_when_cursor_fits() {
+        assert_eq!(vertical_scroll_offset(0, 16), 0);
+        assert_eq!(vertical_scroll_offset(15, 16), 0);
+    }
+
+    #[test]
+    fn scroll_keeps_cursor_on_last_visible_row() {
+        // Line 16 (17th row) in a 16-row box -> scroll by 1.
+        assert_eq!(vertical_scroll_offset(16, 16), 1);
+        assert_eq!(vertical_scroll_offset(30, 16), 15);
+    }
+
+    #[test]
+    fn scroll_zero_height_does_not_panic() {
+        assert_eq!(vertical_scroll_offset(5, 0), 0);
     }
 }

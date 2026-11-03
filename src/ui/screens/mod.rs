@@ -21,7 +21,8 @@ pub use home::render_home_screen;
 pub use inputs::{
     calculate_cursor_in_wrapped_text, render_add_food_screen, render_add_sokay_screen,
     render_date_input_screen, render_edit_food_screen, render_edit_notes_screen,
-    render_edit_sokay_screen, render_edit_strength_mobility_screen, wrap_at_width,
+    render_edit_sokay_screen, render_edit_strength_mobility_screen, vertical_scroll_offset,
+    wrap_at_width,
 };
 pub use startup::render_startup_screen;
 pub use statistics::render_statistics_screen;

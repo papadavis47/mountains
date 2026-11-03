@@ -1,11 +1,12 @@
 use ratatui::{
     Frame,
+    layout::Rect,
     style::{Color, Style},
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
 use crate::ui::components::{centered_rect, create_input_style, format_input_with_cursor};
-use crate::ui::screens::{calculate_cursor_in_wrapped_text, wrap_at_width};
+use crate::ui::screens::{calculate_cursor_in_wrapped_text, vertical_scroll_offset, wrap_at_width};
 
 /// Types of input modals
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -118,13 +119,100 @@ pub fn render_input_modal(
                 wrap_at_width(input_buffer, width)
             };
 
-            let input = Paragraph::new(wrapped_text).style(create_input_style());
-            f.render_widget(input, inner_area);
-
             // Calculate cursor position on the wrapped text
             let (cursor_x, cursor_y) =
                 calculate_cursor_in_wrapped_text(inner_area, input_buffer, cursor_position, width);
-            f.set_cursor_position((cursor_x, cursor_y));
+
+            // Scroll so the cursor line stays visible
+            let height = inner_area.height;
+            let cursor_line = cursor_y.saturating_sub(inner_area.y);
+            let scroll = vertical_scroll_offset(cursor_line, height);
+            let total_lines = wrapped_text.split('\n').count() as u16;
+
+            let input = Paragraph::new(wrapped_text)
+                .style(create_input_style())
+                .scroll((scroll, 0));
+            f.render_widget(input, inner_area);
+
+            // Scroll indicators on the top/bottom borders
+            let indicator_style = Style::default().fg(config.border_color);
+            if scroll > 0 {
+                render_scroll_indicator(f, popup_area, popup_area.y, " ↑ more ", indicator_style);
+            }
+            if total_lines > scroll + height {
+                let bottom = popup_area.y + popup_area.height.saturating_sub(1);
+                render_scroll_indicator(f, popup_area, bottom, " ↓ more ", indicator_style);
+            }
+
+            f.set_cursor_position((cursor_x, cursor_y - scroll));
         }
+    }
+}
+
+/// Draws a scroll indicator right-aligned on a border row of the popup
+fn render_scroll_indicator(f: &mut Frame, popup: Rect, y: u16, label: &str, style: Style) {
+    let label_width = label.chars().count() as u16;
+    if popup.width < label_width + 4 {
+        return;
+    }
+    let area = Rect::new(popup.x + popup.width - label_width - 2, y, label_width, 1);
+    f.render_widget(Paragraph::new(label).style(style), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+
+    fn render(buffer: &str, cursor: usize) -> (String, (u16, u16)) {
+        let mut term = Terminal::new(TestBackend::new(80, 50)).unwrap();
+        term.draw(|f| {
+            let config = InputModalConfig::multiline("Notes".into(), Color::White);
+            render_input_modal(f, config, buffer, cursor);
+        })
+        .unwrap();
+        let pos = term.get_cursor_position().unwrap();
+        let screen = term
+            .backend()
+            .buffer()
+            .content()
+            .chunks(80)
+            .map(|row| row.iter().map(|c| c.symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        (screen, (pos.x, pos.y))
+    }
+
+    fn long_note() -> String {
+        (1..=30)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn multiline_scrolls_to_show_cursor_line_past_box_height() {
+        let note = long_note();
+        let (screen, (_, y)) = render(&note, note.len());
+        assert!(screen.contains("line30"), "last typed line must be visible");
+        assert!(!screen.contains("line1\u{20}"), "top lines scrolled away");
+        assert!(screen.contains("↑ more"));
+        assert!(!screen.contains("↓ more"));
+        // 50 rows * 40% = 20-row popup at y=15; inner bottom row = 15+20-3
+        assert!(y < 15 + 20 - 2, "cursor inside box, got y={y}");
+    }
+
+    #[test]
+    fn multiline_at_top_shows_down_indicator_only() {
+        let (screen, _) = render(&long_note(), 0);
+        assert!(screen.contains("line1 "));
+        assert!(screen.contains("↓ more"));
+        assert!(!screen.contains("↑ more"));
+    }
+
+    #[test]
+    fn multiline_short_text_has_no_indicators() {
+        let (screen, _) = render("hello", 5);
+        assert!(!screen.contains("more"));
     }
 }
