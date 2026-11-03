@@ -2,7 +2,7 @@
 
 A terminal-based training and nutrition tracking application built with Rust and ratatui.
 
-Current release: **v0.11.0**.
+Current release: **v0.12.0**.
 
 ## Project Overview
 
