@@ -5,7 +5,8 @@ use ratatui::{
 
 use crate::models::AppState;
 use crate::ui::components::{
-    create_standard_layout, render_help, render_title, selectable_list_item,
+    MARK_BULLET, create_standard_layout, markable_list_item, render_help, render_title,
+    title_with_marks,
 };
 use crate::ui::{ClickAction, ClickTarget};
 
@@ -35,7 +36,14 @@ pub fn render_home_screen(
             .enumerate()
             .map(|(index, log)| {
                 let date_str = log.date.format("%B %d, %Y").to_string();
-                selectable_list_item(date_str, list_state.selected() == Some(index))
+                let marked = state.marks.is_log_marked(log.date);
+                // Bullet column only while marking, so dates stay aligned.
+                let display = match (marked, state.marks.logs().is_some()) {
+                    (true, _) => format!("{MARK_BULLET} {date_str}"),
+                    (false, true) => format!("  {date_str}"),
+                    (false, false) => date_str,
+                };
+                markable_list_item(display, list_state.selected() == Some(index), marked)
             })
             .collect()
     };
@@ -43,7 +51,10 @@ pub fn render_home_screen(
     // Create the List widget with styling
     let block = Block::default()
         .borders(Borders::ALL)
-        .title("Daily Training Logs")
+        .title(title_with_marks(
+            "Daily Training Logs",
+            state.marks.logs().map_or(0, |dates| dates.len()),
+        ))
         .padding(ratatui::widgets::Padding::uniform(1));
     let list_inner = block.inner(chunks[1]);
     let list = List::new(items).block(block);
@@ -74,8 +85,8 @@ pub fn render_home_screen(
         f,
         chunks[2],
         &[
-            " ↑/k: Up | ↓/j: Down | Enter: Select/Today | a: Add Date | Esc: Unfocus | d: Delete Day | S: Startup Screen | q: Quit",
-            " ↑/k: Up | ↓/j: Down | Enter: Select | a: Add | Esc: Unfocus | d: Delete | S: Startup | q: Quit",
+            " ↑/k: Up | ↓/j: Down | Enter: Select/Today | a: Add Date | Esc: Unfocus | d: Delete Day | x/Ctrl+click: Mark | S: Startup Screen | q: Quit",
+            " ↑/k: Up | ↓/j: Down | Enter: Select | a: Add | Esc: Unfocus | d: Delete | x: Mark | S: Startup | q: Quit",
             " ↑↓/jk: Move | Enter: Select | a: Add | d: Delete | S: Startup | q: Quit",
             " jk: Move | Enter: Select | a: Add | q: Quit",
         ],

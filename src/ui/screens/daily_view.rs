@@ -10,7 +10,10 @@ use ratatui::{
 use crate::miles_stats::{calculate_monthly_miles, calculate_yearly_miles};
 use crate::models::field_accessor::FieldType;
 use crate::models::{AppState, DailyLog, FocusedSection, MeasurementField, RunningField, ViewMode};
-use crate::ui::components::{render_help, render_title, selectable_list_item};
+use crate::models::{Marks, RowList};
+use crate::ui::components::{
+    MARK_BULLET, markable_list_item, render_help, render_title, title_with_marks,
+};
 use crate::ui::{ClickAction, ClickTarget};
 
 /// Active in-place edit of a numeric field, rendered directly inside its section
@@ -30,6 +33,7 @@ pub struct SectionCtx<'a> {
     pub selected_date: NaiveDate,
     pub daily_logs: &'a [DailyLog],
     pub focused_section: &'a FocusedSection,
+    pub marks: &'a Marks,
 }
 
 /// Renders the daily view screen for a specific date
@@ -98,6 +102,7 @@ pub fn render_daily_view_screen(
         selected_date: state.selected_date,
         daily_logs: &state.daily_logs,
         focused_section: &state.focused_section,
+        marks: &state.marks,
     };
 
     render_measurements_section(
@@ -151,7 +156,7 @@ pub fn render_daily_view_screen(
         ]
     } else {
         &[
-            " Shift+J/K: Section | Tab: Toggle Num Fields | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | Space: Shortcuts | S: Startup Screen | Esc: Back",
+            " Shift+J/K: Section | Tab: Toggle Num Fields | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | x: Mark | Space: Shortcuts | S: Startup Screen | Esc: Back",
             " Shift+J/K: Section | Tab: Fields | Enter: Add | j/k: List | e: Edit | d: Delete | Space: Shortcuts | S: Startup | Esc: Back",
             " Shift+J/K: Section | Enter: Add | e: Edit | d: Delete | Space: More | Esc: Back",
             " Space: Shortcuts | Esc: Back",
@@ -260,6 +265,7 @@ fn render_notes_daily_view(
         selected_date: state.selected_date,
         daily_logs: &state.daily_logs,
         focused_section: &state.focused_section,
+        marks: &state.marks,
     };
     render_notes_section(f, chunks[1], ctx, state.notes_scroll, click_targets);
 
@@ -293,6 +299,7 @@ fn render_exercise_daily_view(
         selected_date: state.selected_date,
         daily_logs: &state.daily_logs,
         focused_section: &state.focused_section,
+        marks: &state.marks,
     };
     render_strength_mobility_section(
         f,
@@ -343,6 +350,7 @@ fn render_food_daily_view(
         selected_date: state.selected_date,
         daily_logs: &state.daily_logs,
         focused_section: &state.focused_section,
+        marks: &state.marks,
     };
 
     render_food_list_section(
@@ -364,7 +372,7 @@ fn render_food_daily_view(
     );
 
     let help_tiers: &[&str] = &[
-        " Shift+J/K: Section | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | Space: Shortcuts | Esc: Back",
+        " Shift+J/K: Section | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | x: Mark | Space: Shortcuts | Esc: Back",
         " Shift+J/K: Section | Enter: Add | e: Edit | d: Delete | Space: More | Esc: Back",
         " Space: Shortcuts | Esc: Back",
     ];
@@ -407,6 +415,7 @@ fn render_simple_daily_view(
         selected_date: state.selected_date,
         daily_logs: &state.daily_logs,
         focused_section: &state.focused_section,
+        marks: &state.marks,
     };
 
     let today = chrono::Local::now().date_naive();
@@ -441,7 +450,7 @@ fn render_simple_daily_view(
         ]
     } else {
         &[
-            " Shift+J/K: Section | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | Space: Shortcuts | Esc: Back",
+            " Shift+J/K: Section | Enter: Add | j/k: List | e: Edit Item | d: Delete Item | x: Mark | Space: Shortcuts | Esc: Back",
             " Shift+J/K: Section | Enter: Add | e: Edit | d: Delete | Space: More | Esc: Back",
             " Space: Shortcuts | Esc: Back",
         ]
@@ -775,6 +784,10 @@ fn render_food_list_section(
         .iter()
         .find(|log| log.date == ctx.selected_date);
     let entry_count = log.map_or(0, |log| log.food_entries.len());
+    let food_marked = ctx
+        .marks
+        .rows(RowList::Food, ctx.selected_date)
+        .map_or(0, |rows| rows.len());
 
     let food_selected =
         if matches!(ctx.focused_section, FocusedSection::FoodItems) && food_list_focused {
@@ -791,8 +804,12 @@ fn render_food_list_section(
                 .iter()
                 .enumerate()
                 .map(|(index, entry)| {
-                    let display = format!("- {}", entry.name);
-                    selectable_list_item(display, food_selected == Some(index))
+                    let marked = ctx
+                        .marks
+                        .is_row_marked(RowList::Food, ctx.selected_date, index);
+                    let bullet = if marked { MARK_BULLET } else { "-" };
+                    let display = format!("{bullet} {}", entry.name);
+                    markable_list_item(display, food_selected == Some(index), marked)
                 })
                 .collect()
         }
@@ -809,7 +826,7 @@ fn render_food_list_section(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border_style)
-        .title("Food Items")
+        .title(title_with_marks("Food Items", food_marked))
         .padding(ratatui::widgets::Padding::uniform(1));
     let inner = block.inner(area);
     let list = List::new(items).block(block);
@@ -863,11 +880,19 @@ fn render_sokay_section(
             view_mode: ViewMode::Full,
             frame_width: 0,
             frame_height: 0,
+            marks: crate::models::Marks::None,
         },
         ctx.selected_date,
     );
 
-    let title = format!("Sokay (Total: {})", cumulative_sokay);
+    let sokay_marked = ctx
+        .marks
+        .rows(RowList::Sokay, ctx.selected_date)
+        .map_or(0, |rows| rows.len());
+    let title = title_with_marks(
+        &format!("Sokay (Total: {})", cumulative_sokay),
+        sokay_marked,
+    );
 
     let sokay_selected =
         if matches!(ctx.focused_section, FocusedSection::Sokay) && sokay_list_focused {
@@ -901,8 +926,12 @@ fn render_sokay_section(
             .iter()
             .enumerate()
             .map(|(index, entry)| {
-                let display = format!("- {}", entry);
-                selectable_list_item(display, sokay_selected == Some(index))
+                let marked = ctx
+                    .marks
+                    .is_row_marked(RowList::Sokay, ctx.selected_date, index);
+                let bullet = if marked { MARK_BULLET } else { "-" };
+                let display = format!("{bullet} {}", entry);
+                markable_list_item(display, sokay_selected == Some(index), marked)
             })
             .collect();
         let list = List::new(items).block(block);

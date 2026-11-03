@@ -150,6 +150,15 @@ impl App {
                             sokay_index,
                         );
                     }
+                    DeleteTarget::Marked => {
+                        screens::render_confirm_delete_marked_screen(
+                            f,
+                            &self.state,
+                            &mut self.food_list_state,
+                            &mut self.sokay_list_state,
+                            &self.sync_status,
+                        );
+                    }
                 }
             }
             AppScreen::DateInput => {

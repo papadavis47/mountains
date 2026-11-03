@@ -28,19 +28,44 @@ pub fn create_highlight_style() -> Style {
     Style::default().add_modifier(Modifier::REVERSED)
 }
 
-/// Builds a list row whose selection highlight hugs the text.
+/// Marker in front of rows marked for batch delete
+pub const MARK_BULLET: &str = "●";
+
+/// Style of a row marked for batch delete
+pub fn create_marked_style() -> Style {
+    Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Builds a list row whose selection highlight hugs the text, styled as
+/// marked when it's marked for batch delete.
 ///
 /// `List::highlight_style` (and `ListItem::style`) restyle the whole row rect, which
 /// stretches the highlight across the section on a wide terminal. Styling the item's
 /// own span instead paints only the cells the text occupies, plus one trailing space.
-pub fn selectable_list_item<'a>(text: String, selected: bool) -> ListItem<'a> {
+pub fn markable_list_item<'a>(text: String, selected: bool, marked: bool) -> ListItem<'a> {
+    let base = if marked {
+        create_marked_style()
+    } else {
+        Style::default()
+    };
     if selected {
         ListItem::new(Line::from(Span::styled(
             format!("{text} "),
-            create_highlight_style(),
+            base.patch(create_highlight_style()),
         )))
     } else {
-        ListItem::new(Line::from(text))
+        ListItem::new(Line::from(Span::styled(text, base)))
+    }
+}
+
+/// List title with a "(N marked)" suffix when rows are marked
+pub fn title_with_marks(title: &str, marked: usize) -> String {
+    if marked == 0 {
+        title.to_string()
+    } else {
+        format!("{title} ({marked} marked)")
     }
 }
 

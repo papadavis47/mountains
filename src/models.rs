@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 pub mod field_accessor;
 
@@ -101,6 +102,117 @@ pub enum DeleteTarget {
     Day,
     Food(usize),
     Sokay(usize),
+    /// Everything in `AppState.marks`
+    Marked,
+}
+
+/// A DailyView list whose rows can be marked
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowList {
+    Food,
+    Sokay,
+}
+
+/// Rows marked (Ctrl+click / `x`) for one-confirmation batch delete. Marks
+/// belong to one list at a time; marking in another list starts over. Food
+/// and Sokay marks are row indices tied to a day; log marks are dates, so a
+/// background reload reordering `daily_logs` can't shift them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Marks {
+    #[default]
+    None,
+    Rows {
+        list: RowList,
+        date: NaiveDate,
+        rows: BTreeSet<usize>,
+    },
+    Logs(BTreeSet<NaiveDate>),
+}
+
+impl Marks {
+    pub fn clear(&mut self) {
+        *self = Marks::None;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Marks::None)
+    }
+
+    pub fn count(&self) -> usize {
+        match self {
+            Marks::None => 0,
+            Marks::Rows { rows, .. } => rows.len(),
+            Marks::Logs(dates) => dates.len(),
+        }
+    }
+
+    /// Toggles a Food/Sokay row on `date`
+    pub fn toggle_row(&mut self, list: RowList, date: NaiveDate, row: usize) {
+        match self {
+            Marks::Rows {
+                list: l,
+                date: d,
+                rows,
+            } if *l == list && *d == date => {
+                if !rows.remove(&row) {
+                    rows.insert(row);
+                }
+                if rows.is_empty() {
+                    self.clear();
+                }
+            }
+            _ => {
+                *self = Marks::Rows {
+                    list,
+                    date,
+                    rows: BTreeSet::from([row]),
+                };
+            }
+        }
+    }
+
+    /// Toggles a whole day in the log list
+    pub fn toggle_log(&mut self, date: NaiveDate) {
+        match self {
+            Marks::Logs(dates) => {
+                if !dates.remove(&date) {
+                    dates.insert(date);
+                }
+                if dates.is_empty() {
+                    self.clear();
+                }
+            }
+            _ => *self = Marks::Logs(BTreeSet::from([date])),
+        }
+    }
+
+    /// Marked rows of `list` on `date`, if any
+    pub fn rows(&self, list: RowList, date: NaiveDate) -> Option<&BTreeSet<usize>> {
+        match self {
+            Marks::Rows {
+                list: l,
+                date: d,
+                rows,
+            } if *l == list && *d == date => Some(rows),
+            _ => None,
+        }
+    }
+
+    pub fn is_row_marked(&self, list: RowList, date: NaiveDate, row: usize) -> bool {
+        self.rows(list, date)
+            .is_some_and(|rows| rows.contains(&row))
+    }
+
+    pub fn logs(&self) -> Option<&BTreeSet<NaiveDate>> {
+        match self {
+            Marks::Logs(dates) => Some(dates),
+            _ => None,
+        }
+    }
+
+    pub fn is_log_marked(&self, date: NaiveDate) -> bool {
+        self.logs().is_some_and(|dates| dates.contains(&date))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +286,8 @@ pub struct AppState {
     /// Last rendered frame size, used to bound multi-line section scrolling.
     pub frame_width: u16,
     pub frame_height: u16,
+    /// Rows marked for batch delete
+    pub marks: Marks,
 }
 
 impl AppState {
@@ -196,6 +310,7 @@ impl AppState {
             view_mode: ViewMode::Full,
             frame_width: 0,
             frame_height: 0,
+            marks: Marks::None,
         }
     }
 
@@ -357,5 +472,50 @@ mod tests {
         assert!(state.get_daily_log(today).is_some());
         assert_eq!(state.view_mode, ViewMode::Exercise);
         assert_eq!(state.focused_section, FocusedSection::StrengthMobility);
+    }
+
+    // -- Marks ---------------------------------------------------------------
+
+    fn day(d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, d).unwrap()
+    }
+
+    #[test]
+    fn marks_toggle_row_on_and_off() {
+        let mut m = Marks::None;
+        m.toggle_row(RowList::Food, day(1), 2);
+        m.toggle_row(RowList::Food, day(1), 0);
+        assert_eq!(m.count(), 2);
+        assert!(m.is_row_marked(RowList::Food, day(1), 2));
+        m.toggle_row(RowList::Food, day(1), 2);
+        assert!(!m.is_row_marked(RowList::Food, day(1), 2));
+        m.toggle_row(RowList::Food, day(1), 0);
+        assert!(m.is_empty());
+    }
+
+    #[test]
+    fn marks_switching_list_or_day_starts_over() {
+        let mut m = Marks::None;
+        m.toggle_row(RowList::Food, day(1), 0);
+        m.toggle_row(RowList::Sokay, day(1), 1);
+        assert_eq!(m.count(), 1);
+        assert!(m.rows(RowList::Food, day(1)).is_none());
+        m.toggle_row(RowList::Sokay, day(2), 3);
+        assert!(m.rows(RowList::Sokay, day(1)).is_none());
+        m.toggle_log(day(5));
+        assert!(m.rows(RowList::Sokay, day(2)).is_none());
+        assert!(m.is_log_marked(day(5)));
+    }
+
+    #[test]
+    fn marks_toggle_log_dates() {
+        let mut m = Marks::None;
+        m.toggle_log(day(1));
+        m.toggle_log(day(3));
+        assert_eq!(m.count(), 2);
+        m.toggle_log(day(1));
+        assert!(!m.is_log_marked(day(1)));
+        m.toggle_log(day(3));
+        assert!(m.is_empty());
     }
 }

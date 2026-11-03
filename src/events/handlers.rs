@@ -536,6 +536,37 @@ impl ActionHandler {
         None
     }
 
+    /// Removes the food rows at `indices` from the selected day in one pass
+    pub fn delete_food_entries(
+        state: &mut AppState,
+        indices: &std::collections::BTreeSet<usize>,
+    ) -> Option<DailyLog> {
+        let log = state
+            .daily_logs
+            .iter_mut()
+            .find(|log| log.date == state.selected_date)?;
+        // Highest first so earlier removals don't shift later indices.
+        for &index in indices.iter().rev() {
+            log.remove_food_entry(index);
+        }
+        Some(log.clone())
+    }
+
+    /// Removes the sokay rows at `indices` from the selected day in one pass
+    pub fn delete_sokay_entries(
+        state: &mut AppState,
+        indices: &std::collections::BTreeSet<usize>,
+    ) -> Option<DailyLog> {
+        let log = state
+            .daily_logs
+            .iter_mut()
+            .find(|log| log.date == state.selected_date)?;
+        for &index in indices.iter().rev() {
+            log.remove_sokay_entry(index);
+        }
+        Some(log.clone())
+    }
+
     pub fn handle_home_enter(state: &mut AppState, selected_index: Option<usize>) {
         if let Some(index) = selected_index {
             if index < state.daily_logs.len() {

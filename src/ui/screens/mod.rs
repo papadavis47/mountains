@@ -11,7 +11,7 @@ pub mod statistics;
 pub use config_sync::render_config_sync_screen;
 pub use confirmations::{
     render_confirm_delete_day_screen, render_confirm_delete_food_screen,
-    render_confirm_delete_sokay_screen,
+    render_confirm_delete_marked_screen, render_confirm_delete_sokay_screen,
 };
 pub use daily_view::{
     InPlaceEdit, max_scroll_offset, render_daily_view_screen, single_section_max_scroll,

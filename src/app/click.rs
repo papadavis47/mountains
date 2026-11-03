@@ -1,4 +1,5 @@
 use super::*;
+use crossterm::event::KeyModifiers;
 
 impl App {
     pub(super) fn handle_mouse_event(&mut self, mouse: MouseEvent) {
@@ -16,7 +17,18 @@ impl App {
             return;
         }
 
-        if let Some(action) = hit_test(&self.click_targets, column, row) {
+        let action = hit_test(&self.click_targets, column, row);
+        if mouse.modifiers.contains(KeyModifiers::CONTROL)
+            && action
+                .as_ref()
+                .is_some_and(|action| self.handle_mark_click(action))
+        {
+            self.prune_marks();
+            return;
+        }
+        // A plain click starts a fresh selection, like a file finder.
+        self.state.marks.clear();
+        if let Some(action) = action {
             self.handle_click_action(action);
         }
     }

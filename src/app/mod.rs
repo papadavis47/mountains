@@ -51,6 +51,7 @@ pub struct App {
 // lifecycle methods (new/run/event dispatch/sync) stay here in the parent.
 mod click;
 mod input;
+mod marks;
 mod navigation;
 mod render;
 
@@ -213,6 +214,7 @@ impl App {
             AppScreen::ConfigSync => self.handle_config_sync_input(key).await?,
             _ => self.handle_navigation_input(key, modifiers).await?,
         }
+        self.prune_marks();
         Ok(())
     }
 

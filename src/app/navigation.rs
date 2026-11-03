@@ -92,9 +92,21 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                self.handle_escape();
+                // First Esc clears marks; the next one backs out as usual.
+                if self.state.marks.is_empty() {
+                    self.handle_escape();
+                } else {
+                    self.state.marks.clear();
+                }
+            }
+            KeyCode::Char('x') => {
+                self.toggle_mark_at_cursor();
             }
             KeyCode::Char('d') => {
+                // Marks take precedence: one confirmation for all of them.
+                if self.request_delete_marked() {
+                    return Ok(());
+                }
                 if matches!(self.state.current_screen, AppScreen::Home) {
                     self.handle_delete_day_confirmation();
                 } else if matches!(self.state.current_screen, AppScreen::DailyView) {

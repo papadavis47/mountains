@@ -392,6 +392,7 @@ impl App {
                         self.state.current_screen = AppScreen::DailyView;
                     }
                 }
+                DeleteTarget::Marked => self.delete_marked().await?,
             },
             KeyCode::Char('n') | KeyCode::Esc => match target {
                 DeleteTarget::Day => {
@@ -400,6 +401,7 @@ impl App {
                 DeleteTarget::Food(_) | DeleteTarget::Sokay(_) => {
                     self.state.current_screen = AppScreen::DailyView;
                 }
+                DeleteTarget::Marked => self.cancel_delete_marked(),
             },
             _ => {}
         }

@@ -17,6 +17,7 @@ This is a TUI (Terminal User Interface) application for tracking daily training 
 - **Strength & mobility tracking** - multi-line text field for logging exercises
 - **Daily notes** for observations and reflections
 - **Full CRUD operations** - add, edit, and delete entries for food and sokay items, plus delete entire days
+- **Multi-select delete** - mark several food items, sokay items, or days with Ctrl+click or `x`, then delete them all with one `d` + `y`
 - **Cursor-enabled text input** with arrow key navigation
 - **Dual persistence** - libsql database (primary) with markdown file backups, optional Turso Cloud sync
 - **Cloud sync** - syncs on startup and shutdown (with visual progress indicator), and pushes each save and day deletion in the background
@@ -81,8 +82,9 @@ The home screen starts with the list **unfocused** (no item highlighted).
 
 - `↑/↓` or `j/k` - Navigate between dates
 - `Enter` - Go to selected date's log
-- `Esc` - Unfocus the list (remove highlight)
-- `d` - Delete selected day (with confirmation)
+- `Esc` - Clear marks if any, else unfocus the list (remove highlight)
+- `d` - Delete selected day (with confirmation); with marks, deletes all marked days after one confirmation
+- `x` or `Ctrl+click` - Mark/unmark a day for batch delete (see Multi-Select Delete)
 
 #### Always available:
 
@@ -137,8 +139,9 @@ Lists start **unfocused** (no item highlighted) for quick access to adding new e
 
 - `↑/↓` or `j/k` - Navigate between items
 - `e` - Edit selected item
-- `d` - Delete selected item (with confirmation)
-- `Esc` - Unfocus the item (remove highlight), next Esc returns to home
+- `d` - Delete selected item (with confirmation); with marks, deletes all marked items after one confirmation
+- `x` or `Ctrl+click` - Mark/unmark an item for batch delete (see Multi-Select Delete)
+- `Esc` - Clear marks if any, else unfocus the item (remove highlight); next Esc returns to home
 
 #### Expanded View (Strength & Mobility and Notes sections only)
 
@@ -257,6 +260,18 @@ Weight, Waist, Miles, and Elevation are edited **in place** within their Measure
 - `y` - Confirm deletion
 - `n` or `Esc` - Cancel deletion and return to home screen
 
+### Multi-Select Delete
+
+Works in the Food list, Sokay list (any DailyView mode that shows them), and the Home log list.
+
+- `Ctrl+click` a row - mark/unmark it (focuses the list and moves the highlight; never opens or edits)
+- `x` - mark/unmark the highlighted row
+- Marked rows show `●` in cyan bold; the list title gains `(N marked)`
+- Plain click - clears all marks, then acts as a normal click (file-finder style)
+- `d` with marks - one confirmation listing marked items/dates (first 8, then "...and N more"); `y` deletes all in one save + sync, `n`/`Esc` returns with marks kept. Only marked rows are deleted, not the unmarked highlighted row
+- `Esc` with marks - clears marks only
+- Marks belong to one list at a time; marking in another list starts over. They clear on leaving the list: other section, list unfocused, day change, or screen change (`App::prune_marks`, run after every key/mouse event)
+
 ### Cloud Sync Config Screen
 
 Accessed from Startup screen via `c`. Centered modal overlay (~60% width, ~50% height).
@@ -330,6 +345,7 @@ src/
 │   ├── render.rs        # `ui`: per-screen render dispatch
 │   ├── click.rs         # Mouse hit-testing → ClickAction handling
 │   ├── input.rs         # Text/modal input handlers (food, sokay, fields, date, config, delete)
+│   ├── marks.rs         # Multi-select marks (Ctrl+click/`x`) + batch delete
 │   └── navigation.rs    # Key-driven navigation, selection, quick-access edits
 ├── config.rs            # AppConfig/SyncConfig with TOML persistence + .env migration
 ├── models.rs            # Data structures (FoodEntry, DailyLog, AppState, AppScreen)
@@ -427,7 +443,16 @@ committed pre-commit hook enforces this on every commit.
 
 ## Recent Improvements
 
-### Latest Session (Exercise Launch Mode and Sokay Explainer)
+### Latest Session (Multi-Select Delete and Scrolling Multiline Input)
+
+- ✅ **Multi-select delete** - Ctrl+click or `x` marks Food/Sokay rows or Home days; `d` + one `y` deletes all marked (`app/marks.rs`)
+- ✅ **`Marks` model** - `AppState.marks`: `Rows { list, date, rows }` (indices tied to a day) or `Logs(dates)` (dates, so background reloads can't shift them); `DeleteTarget::Marked` reads it
+- ✅ **Central pruning** - `App::prune_marks` after every event drops marks whose list is no longer active, instead of clearing at each exit path
+- ✅ **Rendering** - `markable_list_item` (replaces `selectable_list_item`) shows `●` + cyan bold; titles show `(N marked)`; batch confirm via `render_confirm_delete_marked_screen`
+- ✅ **Scrolling multiline input** - Notes / Strength & Mobility modal scrolls to keep the cursor line visible, with `↑ more` / `↓ more` border indicators (`vertical_scroll_offset`)
+- ✅ **Test coverage** - marks model, key/click flows, pruning, batch delete for food/sokay/days, confirm dialog rendering, modal scroll
+
+### Previous Session (Exercise Launch Mode and Sokay Explainer)
 
 - ✅ **`-e`/`--exercise` flag** - Centered window with only Strength & Mobility, filling the window and scrolling in place, for logging non-running workouts
 - ✅ **Shared single-section layout** - `notes_mode_chunks`/`notes_mode_max_scroll` generalized to `single_section_chunks`/`single_section_max_scroll`, used by notes and exercise modes
@@ -452,7 +477,7 @@ committed pre-commit hook enforces this on every commit.
 ### Earlier Session (Text-Hugging List Highlight)
 
 - ✅ **Selection hugs the text** - Home, Food, and Sokay rows highlight only the row text plus one trailing space instead of the full section width
-- ✅ **Shared helper** - `selectable_list_item` in `ui/components.rs` replaces the three `highlight_style` call sites
+- ✅ **Shared helper** - `selectable_list_item` (now `markable_list_item`) in `ui/components.rs` replaces the three `highlight_style` call sites
 - ✅ **Test coverage** - `TestBackend` buffer assertions on the reversed-cell run for Home and Food, plus an unfocused-list no-highlight case
 
 ### Earlier Session (CLI Launch Flags and Simple Mode)

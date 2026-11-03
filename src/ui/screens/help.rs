@@ -85,6 +85,7 @@ Nutrition:
   j/k - Select item in list
   e - Edit selected item
   d - Delete selected item
+  x / Ctrl+click - Mark items; d deletes all marked
 
 Press Enter to save entry, or Esc to exit field
 
@@ -104,6 +105,7 @@ Activity:
 Nutrition:
   f - Add food item
   c - Add sokay entry
+  x / Ctrl+click - Mark list items; d deletes all marked
 
 Training:
   t - Edit strength & mobility
