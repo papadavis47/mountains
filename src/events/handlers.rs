@@ -655,16 +655,25 @@ impl ActionHandler {
             .sum()
     }
 
-    pub async fn delete_daily_log(
-        state: &mut AppState,
-        db_manager: &mut DbManager,
+    /// Deletes whole days from the database and markdown backups, then pushes
+    /// to Turso. Run detached: on a replica every write is a network round-trip.
+    pub async fn persist_day_deletions(
+        db_manager: Arc<RwLock<DbManager>>,
         file_manager: &FileManager,
-        date: chrono::NaiveDate,
-    ) -> anyhow::Result<()> {
-        db_manager.delete_daily_log(date).await?;
-        state.daily_logs.retain(|log| log.date != date);
-        let _ = file_manager.delete_daily_log(date);
-        Ok(())
+        dates: Vec<chrono::NaiveDate>,
+    ) {
+        {
+            let mut db = db_manager.write().await;
+            for &date in &dates {
+                let _ = db.delete_daily_log(date).await;
+            }
+        }
+        for &date in &dates {
+            let _ = file_manager.delete_daily_log(date);
+        }
+        // Write lock released before the network sync, as in `persist_daily_log`.
+        let db = db_manager.read().await;
+        let _ = db.sync_now().await;
     }
 }
 

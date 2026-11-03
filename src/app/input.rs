@@ -336,18 +336,7 @@ impl App {
         match key {
             KeyCode::Char('y') => match target {
                 DeleteTarget::Day => {
-                    let date_to_delete = self.state.selected_date;
-                    {
-                        let mut db = self.db_manager.write().await;
-                        ActionHandler::delete_daily_log(
-                            &mut self.state,
-                            &mut db,
-                            &self.file_manager,
-                            date_to_delete,
-                        )
-                        .await?;
-                    }
-                    self.spawn_sync();
+                    self.delete_days(vec![self.state.selected_date]);
                     self.state.current_screen = AppScreen::Home;
                     self.list_state.select(None);
                 }
@@ -392,7 +381,7 @@ impl App {
                         self.state.current_screen = AppScreen::DailyView;
                     }
                 }
-                DeleteTarget::Marked => self.delete_marked().await?,
+                DeleteTarget::Marked => self.delete_marked(),
             },
             KeyCode::Char('n') | KeyCode::Esc => match target {
                 DeleteTarget::Day => {

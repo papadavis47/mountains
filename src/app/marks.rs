@@ -114,8 +114,9 @@ impl App {
         }
     }
 
-    /// `y` on the batch confirmation: delete every marked row in one save/sync
-    pub(super) async fn delete_marked(&mut self) -> Result<()> {
+    /// `y` on the batch confirmation: delete every marked row in one save/sync.
+    /// Memory updates now; the database catches up on a background task.
+    pub(super) fn delete_marked(&mut self) {
         match std::mem::take(&mut self.state.marks) {
             Marks::None => {}
             Marks::Rows { list, rows, .. } => {
@@ -135,24 +136,11 @@ impl App {
                 self.state.current_screen = AppScreen::DailyView;
             }
             Marks::Logs(dates) => {
-                {
-                    let mut db = self.db_manager.write().await;
-                    for date in dates {
-                        ActionHandler::delete_daily_log(
-                            &mut self.state,
-                            &mut db,
-                            &self.file_manager,
-                            date,
-                        )
-                        .await?;
-                    }
-                }
-                self.spawn_sync();
+                self.delete_days(dates.into_iter().collect());
                 self.list_state.select(None);
                 self.state.current_screen = AppScreen::Home;
             }
         }
-        Ok(())
     }
 
     /// `n`/Esc on the batch confirmation: back to the list, marks kept

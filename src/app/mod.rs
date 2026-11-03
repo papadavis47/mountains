@@ -230,13 +230,16 @@ impl App {
         });
     }
 
-    /// Pushes locally committed changes to Turso on a detached task, taking only a
-    /// read lock so the render loop is never excluded during the network call.
-    fn spawn_sync(&self) {
+    /// Removes `dates` from memory now and from the database/backups on a
+    /// detached task, so confirming a day delete never waits on the network.
+    fn delete_days(&mut self, dates: Vec<chrono::NaiveDate>) {
+        self.state
+            .daily_logs
+            .retain(|log| !dates.contains(&log.date));
         let db_manager = Arc::clone(&self.db_manager);
+        let file_manager = self.file_manager.clone();
         tokio::spawn(async move {
-            let db = db_manager.read().await;
-            let _ = db.sync_now().await;
+            ActionHandler::persist_day_deletions(db_manager, &file_manager, dates).await;
         });
     }
 
@@ -327,5 +330,101 @@ mod tests {
         release.notify_one();
         holder.await.unwrap();
         assert_eq!(app.sync_status, "⚪ Offline");
+    }
+
+    fn day(d: u32) -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 11, d).unwrap()
+    }
+
+    /// Saves days 1..=3 to the DB and opens Home with day 3 (newest) selected.
+    async fn app_with_saved_days(dir: &TempDir) -> App {
+        let mut app = test_support::test_app(dir).await;
+        for d in 1..=3 {
+            let log = app.state.get_or_create_daily_log(day(d)).clone();
+            app.db_manager
+                .write()
+                .await
+                .save_daily_log(&log)
+                .await
+                .unwrap();
+        }
+        app.state.current_screen = AppScreen::Home;
+        app.list_state.select(Some(0));
+        app
+    }
+
+    async fn press(app: &mut App, key: KeyCode) {
+        app.handle_key_event_with_modifiers(key, crossterm::event::KeyModifiers::NONE)
+            .await
+            .unwrap();
+    }
+
+    /// Waits (bounded) for the background delete to reach the database.
+    async fn saved_dates(app: &App, expected: usize) -> Vec<chrono::NaiveDate> {
+        for _ in 0..100 {
+            let dates: Vec<_> = app
+                .db_manager
+                .read()
+                .await
+                .load_all_daily_logs()
+                .await
+                .unwrap()
+                .iter()
+                .map(|l| l.date)
+                .collect();
+            if dates.len() == expected {
+                return dates;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("background delete never reached the database");
+    }
+
+    /// Confirming a day delete must not wait on the DB lock (on a Turso
+    /// replica each write is a network round-trip): memory and screen update
+    /// at once, the database catches up in the background.
+    #[tokio::test]
+    async fn confirming_day_delete_does_not_wait_on_the_database() {
+        let dir = TempDir::new().unwrap();
+        let mut app = app_with_saved_days(&dir).await;
+        press(&mut app, KeyCode::Char('d')).await;
+
+        let db = Arc::clone(&app.db_manager);
+        let guard = db.write().await;
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            press(&mut app, KeyCode::Char('y')),
+        )
+        .await
+        .expect("y must not wait on the database lock");
+        assert!(matches!(app.state.current_screen, AppScreen::Home));
+        assert!(app.state.get_daily_log(day(3)).is_none());
+        drop(guard);
+
+        assert_eq!(saved_dates(&app, 2).await, [day(2), day(1)]);
+    }
+
+    #[tokio::test]
+    async fn confirming_marked_days_delete_does_not_wait_on_the_database() {
+        let dir = TempDir::new().unwrap();
+        let mut app = app_with_saved_days(&dir).await;
+        press(&mut app, KeyCode::Char('x')).await; // day 3
+        app.list_state.select(Some(2));
+        press(&mut app, KeyCode::Char('x')).await; // day 1
+        press(&mut app, KeyCode::Char('d')).await;
+
+        let db = Arc::clone(&app.db_manager);
+        let guard = db.write().await;
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            press(&mut app, KeyCode::Char('y')),
+        )
+        .await
+        .expect("y must not wait on the database lock");
+        let left: Vec<_> = app.state.daily_logs.iter().map(|l| l.date).collect();
+        assert_eq!(left, [day(2)]);
+        drop(guard);
+
+        assert_eq!(saved_dates(&app, 1).await, [day(2)]);
     }
 }
