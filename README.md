@@ -78,6 +78,7 @@ mountains
 | `-n`, `--notes` | Open today's notes in a compact view |
 | `-f`, `--food` | Open today's food and sokay in a compact view |
 | `-e`, `--exercise` | Open today's strength & mobility in a compact view |
+| `--resync-backups` | Clean up markdown backups: pull from Turso (if sync is on), write/update one `.md` per day in the DB, delete `.md` files for days no longer in the DB, then exit. Aborts without changes if Turso can't be reached |
 | `-h`, `--help` | Print help |
 | `-V`, `--version` | Print version |
 

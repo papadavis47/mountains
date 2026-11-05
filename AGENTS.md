@@ -308,6 +308,7 @@ Parsed in `main.rs` (`handle_cli_args`) before the TUI starts, so they print to 
 - `-n` / `--notes` - Launch directly into today's log in **notes mode** (Notes only, see below); implies `-t`
 - `-f` / `--food` - Launch directly into today's log in **food mode** (Food and Sokay only, see below); implies `-t`
 - `-e` / `--exercise` - Launch directly into today's log in **exercise mode** (Strength & Mobility only, see below); implies `-t`
+- `--resync-backups` - Headless backup cleanup (`resync.rs`), no TUI. Pulls from Turso first when sync is configured (aborts with exit 1 and touches nothing if `upgrade_to_remote_replica` or the explicit `sync_now` fails — a stale replica must never decide deletions), then `FileManager::resync` makes the backup folder mirror the DB: creates missing `mtslog-*.md`, rewrites stale ones, removes ones whose date isn't in the DB. Only exact `mtslog-MM.DD.YYYY.md` names with valid dates are ever touched (`parse_backup_filename`). Guard: empty DB + existing backups → abort. The FileManager is rooted at `config::data_dir()` (honors `MOUNTAINS_DATA_DIR`) so it never prunes one folder against another folder's DB. Prints created/updated/unchanged/removed (removed filenames listed), exit 0. Long form only; no prompt, no trash. Normal save/delete `.md` behavior is unchanged
 - `-V` / `--version` - Print `mountains <version>` (version sourced from `CARGO_PKG_VERSION`, auto-synced to Cargo.toml) and exit 0
 - `-h` / `--help` - Print usage/help (the `HELP_TEXT` const) and exit 0
 - Unrecognized argument - Print error + help to stderr and exit 2
@@ -339,7 +340,7 @@ Three more compact DailyView variants sharing simple mode's centered window, exi
 
 ```
 src/
-├── main.rs              # Application entry point + CLI flag handling (--version/--help)
+├── main.rs              # Application entry point + CLI flag handling (--version/--help/--resync-backups)
 ├── app/                 # Main App struct, split across an impl in sibling submodules
 │   ├── mod.rs           # App struct + lifecycle (new/run/event dispatch/sync helpers)
 │   ├── render.rs        # `ui`: per-screen render dispatch
@@ -354,7 +355,8 @@ src/
 ├── elevation_stats.rs   # Elevation statistics calculations
 ├── miles_stats.rs       # Miles statistics calculations
 ├── db_manager.rs        # Database operations with Turso Cloud sync
-├── file_manager.rs      # Markdown serialization for write-only backups (+ delete)
+├── file_manager.rs      # Markdown serialization for write-only backups (+ delete, resync)
+├── resync.rs            # --resync-backups: pull, then mirror backups to the DB
 ├── events/
 │   └── handlers.rs      # Event handlers (InputHandler, ActionHandler)
 └── ui/
@@ -365,7 +367,7 @@ src/
         ├── statistics.rs  # Weekly/monthly/yearly statistics screen
         └── ...            # Other screen modules
 
-Data storage:
+Data storage (root is `config::data_dir()`: `~/.mountains`, or `$MOUNTAINS_DATA_DIR` if set — never hard-code the path):
 - Database: ~/.mountains/mountains.db (local libsql database)
 - Config: ~/.mountains/config.toml (cloud sync credentials, TOML format)
 - Backups: ~/.mountains/mtslog-MM.DD.YYYY.md (markdown files)
@@ -443,7 +445,14 @@ committed pre-commit hook enforces this on every commit.
 
 ## Recent Improvements
 
-### Latest Session (Multi-Select Delete and Scrolling Multiline Input)
+### Latest Session (`--resync-backups`)
+
+- ✅ **Backup cleanup flag** - `mountains --resync-backups` pulls from Turso, then makes `mtslog-*.md` mirror the DB (create/update/remove); fixes backups going stale for days changed or deleted by other clients (other machines, future web app)
+- ✅ **Safety** - aborts untouched if Turso unreachable or DB empty while backups exist; only exact backup filenames touched; rooted at `config::data_dir()`
+- ✅ **One data dir** - `FileManager::new` and the ConfigSync save's `upgrade_to_remote_replica` now use `config::data_dir()` (were hard-coded `~/.mountains`). With `MOUNTAINS_DATA_DIR` set (dev `.envrc`), TUI saves wrote backups to the real folder and saving sync config would have stashed the real DB. `config::data_dir` is now the only place the path is resolved
+- ✅ **Tests** - filename parsing, resync create/update/unchanged/remove, non-backup files untouched, empty guard, summary, CLI parse
+
+### Previous Session (Multi-Select Delete and Scrolling Multiline Input)
 
 - ✅ **Multi-select delete** - Ctrl+click or `x` marks Food/Sokay rows or Home days; `d` + one `y` deletes all marked (`app/marks.rs`)
 - ✅ **`Marks` model** - `AppState.marks`: `Rows { list, date, rows }` (indices tied to a day) or `Logs(dates)` (dates, so background reloads can't shift them); `DeleteTarget::Marked` reads it

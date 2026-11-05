@@ -290,8 +290,9 @@ impl App {
                 // If newly configured, spawn background cloud connection
                 if self.config.sync.is_configured() {
                     let db_manager_clone = Arc::clone(&self.db_manager);
-                    let home_dir = dirs::home_dir().context("Could not find home directory")?;
-                    let mountains_dir = home_dir.join(".mountains");
+                    // Same dir the open DB lives in (honors MOUNTAINS_DATA_DIR);
+                    // a different path would stash an unrelated database.
+                    let mountains_dir = crate::config::data_dir()?;
                     let url = self.config.sync.db_url.clone();
                     let token = self.config.sync.auth_token.clone();
                     tokio::spawn(async move {

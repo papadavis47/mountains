@@ -8,6 +8,7 @@ mod file_manager;
 mod miles_stats;
 mod models;
 mod period;
+mod resync;
 mod ui;
 
 use anyhow::Result;
@@ -23,7 +24,7 @@ use crate::app::App;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let launch_mode = handle_cli_args();
+    let command = handle_cli_args();
 
     let data_dir = config::data_dir()?;
 
@@ -31,6 +32,20 @@ async fn main() -> Result<()> {
     config::migrate_from_env(&data_dir).ok();
 
     let app_config = config::AppConfig::load()?;
+
+    let launch_mode = match command {
+        Command::Launch(mode) => mode,
+        Command::ResyncBackups => match resync::run(&app_config).await {
+            Ok((dir, source, report)) => {
+                println!("{}", resync::summary(&dir, &source, &report));
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                std::process::exit(1);
+            }
+        },
+    };
 
     setup_terminal()?;
 
@@ -67,6 +82,8 @@ const HELP_TEXT: &str = concat!(
     "    -n, --notes      Open today's notes in a compact view\n",
     "    -f, --food       Open today's food and sokay in a compact view\n",
     "    -e, --exercise   Open today's strength & mobility in a compact view\n",
+    "    --resync-backups Rewrite markdown backups from the database (pulling\n",
+    "                     from Turso first if sync is on) and delete orphans\n",
     "    -h, --help       Print this help message\n",
     "    -V, --version    Print version information\n",
     "\n",
@@ -80,6 +97,7 @@ const HELP_TEXT: &str = concat!(
 #[derive(Debug, PartialEq)]
 enum CliAction {
     Launch(models::LaunchMode),
+    ResyncBackups,
     PrintVersion,
     PrintHelp,
     Unrecognized(String),
@@ -95,20 +113,28 @@ fn parse_cli_arg(arg: Option<&str>) -> CliAction {
         Some("-n") | Some("--notes") => CliAction::Launch(models::LaunchMode::Notes),
         Some("-f") | Some("--food") => CliAction::Launch(models::LaunchMode::Food),
         Some("-e") | Some("--exercise") => CliAction::Launch(models::LaunchMode::Exercise),
+        Some("--resync-backups") => CliAction::ResyncBackups,
         Some("-V") | Some("--version") => CliAction::PrintVersion,
         Some("-h") | Some("--help") => CliAction::PrintHelp,
         Some(other) => CliAction::Unrecognized(other.to_string()),
     }
 }
 
+/// What `main` should run once config is loaded.
+enum Command {
+    Launch(models::LaunchMode),
+    ResyncBackups,
+}
+
 /// Handles CLI flags before the TUI starts. Exits the process after printing
-/// version/help/errors; otherwise returns the launch mode for the TUI.
-fn handle_cli_args() -> models::LaunchMode {
+/// version/help/errors; otherwise returns the command to run.
+fn handle_cli_args() -> Command {
     // `nth(1)` skips argv[0] (the binary name).
     let arg = std::env::args().nth(1);
 
     match parse_cli_arg(arg.as_deref()) {
-        CliAction::Launch(mode) => mode,
+        CliAction::Launch(mode) => Command::Launch(mode),
+        CliAction::ResyncBackups => Command::ResyncBackups,
         CliAction::PrintVersion => {
             println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
@@ -221,6 +247,18 @@ mod tests {
         assert_eq!(parse_cli_arg(Some("--version")), CliAction::PrintVersion);
         assert_eq!(parse_cli_arg(Some("-h")), CliAction::PrintHelp);
         assert_eq!(parse_cli_arg(Some("--help")), CliAction::PrintHelp);
+    }
+
+    #[test]
+    fn resync_backups_flag_is_long_form_only() {
+        assert_eq!(
+            parse_cli_arg(Some("--resync-backups")),
+            CliAction::ResyncBackups
+        );
+        assert_eq!(
+            parse_cli_arg(Some("-r")),
+            CliAction::Unrecognized("-r".to_string())
+        );
     }
 
     #[test]
